@@ -8,7 +8,7 @@ RUN npm ci
 
 # Copy source code and build frontend assets
 COPY src/ ./src/
-COPY public/ ./public/
+
 COPY index.html ./
 COPY tsconfig*.json ./
 COPY vite.config.ts ./
