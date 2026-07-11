@@ -21,7 +21,7 @@ export function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !password) {
-      setError('Please enter both username and password.');
+      setError('Please enter your email/username and password.');
       triggerShake();
       return;
     }
@@ -109,7 +109,7 @@ export function LoginPage() {
 
             {/* Username */}
             <div>
-              <label className="block text-[11px] font-semibold text-white/50 uppercase tracking-wider mb-2">Username</label>
+              <label className="block text-[11px] font-semibold text-white/50 uppercase tracking-wider mb-2">Email or Username</label>
               <div className="relative">
                 <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
                 <input
@@ -117,7 +117,7 @@ export function LoginPage() {
                   type="text"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
-                  placeholder="Enter your username"
+                  placeholder="Email or username"
                   autoComplete="username"
                   className="w-full pl-10 pr-4 py-3 bg-white/[0.05] border border-white/[0.08] rounded-xl text-[13px] text-white placeholder:text-white/25 outline-none focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 transition-all"
                 />

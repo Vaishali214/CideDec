@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
+import { api } from '../lib/api';
 import type { SavedAnalysisRow, SavedAnalysisInsert } from '../lib/database.types';
 
 export function useSavedAnalyses(userId: string | undefined) {
@@ -9,48 +9,31 @@ export function useSavedAnalyses(userId: string | undefined) {
   const fetchSaved = useCallback(async () => {
     if (!userId) return;
     setLoading(true);
-
-    const { data } = await supabase
-      .from('saved_analyses')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-
+    const { data } = await api.get<{ data: SavedAnalysisRow[] }>('/api/saved');
     setLoading(false);
-    if (data) setAnalyses(data as SavedAnalysisRow[]);
+    if (data) setAnalyses((data as any).data ?? []);
   }, [userId]);
 
-  const saveAnalysis = useCallback(async (input: SavedAnalysisInsert) => {
+  const saveAnalysis = useCallback(async (input: Omit<SavedAnalysisInsert, 'user_id'>) => {
     if (!userId) return { error: 'Not authenticated' };
-
-    const { data, error } = await supabase
-      .from('saved_analyses')
-      .insert({ ...input, user_id: userId })
-      .select()
-      .single();
-
+    const { data, error } = await api.post<{ data: SavedAnalysisRow }>('/api/saved', input);
     if (!error && data) {
-      setAnalyses(prev => [data as SavedAnalysisRow, ...prev]);
+      setAnalyses(prev => [(data as any).data as SavedAnalysisRow, ...prev]);
     }
-    return { error: error?.message ?? null };
+    return { error: error ?? null };
   }, [userId]);
 
   const toggleFavorite = useCallback(async (id: string) => {
     const analysis = analyses.find(a => a.id === id);
     if (!analysis) return;
-
-    await supabase
-      .from('saved_analyses')
-      .update({ is_favorite: !analysis.is_favorite })
-      .eq('id', id);
-
+    await api.put(`/api/saved/${id}/favorite`, { is_favorite: !analysis.is_favorite });
     setAnalyses(prev =>
       prev.map(a => a.id === id ? { ...a, is_favorite: !a.is_favorite } : a)
     );
   }, [analyses]);
 
   const deleteAnalysis = useCallback(async (id: string) => {
-    await supabase.from('saved_analyses').delete().eq('id', id);
+    await api.delete(`/api/saved/${id}`);
     setAnalyses(prev => prev.filter(a => a.id !== id));
   }, []);
 

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
+import { api } from '../lib/api';
 import type { GamificationRow } from '../lib/database.types';
 
 type UserLevel = 'beginner' | 'intermediate' | 'advanced' | 'expert';
@@ -20,20 +20,15 @@ export function useGamification(userId: string | undefined) {
   const fetchGamification = useCallback(async () => {
     if (!userId) return;
 
-    const { data, error } = await supabase
-      .from('gamification')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
+    const { data, error } = await api.get<GamificationRow>('/api/gamification');
 
     if (!error && data) {
-      const g = data as GamificationRow;
       setState({
-        score: g.total_score,
-        level: g.level as UserLevel,
-        totalQueries: g.total_queries,
-        badges: g.badges,
-        streak: g.streak,
+        score: data.total_score,
+        level: data.level as UserLevel,
+        totalQueries: data.total_queries,
+        badges: Array.isArray(data.badges) ? data.badges : JSON.parse(data.badges || '[]'),
+        streak: data.streak,
       });
     }
   }, [userId]);
@@ -41,27 +36,22 @@ export function useGamification(userId: string | undefined) {
   const updateAfterQuery = useCallback(async (queryScore: number) => {
     if (!userId) return;
 
-    const { data: current } = await supabase
-      .from('gamification')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
+    const { data: current, error } = await api.get<GamificationRow>('/api/gamification');
 
-    if (!current) return;
+    if (error || !current) return;
 
-    const g = current as GamificationRow;
     const today = new Date().toISOString().split('T')[0];
-    const lastDate = g.last_query_date;
+    const lastDate = current.last_query_date;
 
-    const newTotalScore = g.total_score + queryScore;
-    const newTotalQueries = g.total_queries + 1;
+    const newTotalScore = current.total_score + queryScore;
+    const newTotalQueries = current.total_queries + 1;
     const avg = newTotalScore / newTotalQueries;
 
     // Streak logic
-    let newStreak = g.streak;
+    let newStreak = current.streak;
     if (lastDate !== today) {
       const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-      newStreak = lastDate === yesterday ? g.streak + 1 : 1;
+      newStreak = lastDate === yesterday ? current.streak + 1 : 1;
     }
 
     // Level
@@ -71,7 +61,11 @@ export function useGamification(userId: string | undefined) {
       avg >= 45 ? 'intermediate' : 'beginner';
 
     // Badges
-    const newBadges = [...g.badges];
+    const currentBadges = Array.isArray(current.badges) 
+      ? current.badges 
+      : JSON.parse(current.badges || '[]');
+      
+    const newBadges = [...currentBadges];
     if (newTotalQueries >= 1  && !newBadges.includes('First Search'))     newBadges.push('First Search');
     if (newTotalQueries >= 5  && !newBadges.includes('Explorer'))         newBadges.push('Explorer');
     if (newTotalQueries >= 10 && !newBadges.includes('Analyst'))          newBadges.push('Analyst');
@@ -80,18 +74,16 @@ export function useGamification(userId: string | undefined) {
     if (newTotalScore >= 500  && !newBadges.includes('Power User'))       newBadges.push('Power User');
     if (newStreak >= 7        && !newBadges.includes('Week Warrior'))      newBadges.push('Week Warrior');
 
-    await supabase
-      .from('gamification')
-      .update({
-        total_score: newTotalScore,
-        total_queries: newTotalQueries,
-        level: newLevel,
-        badges: newBadges,
-        streak: Math.min(newStreak, 30),
-        last_query_date: today,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', userId);
+    const updatePayload = {
+      total_score: newTotalScore,
+      total_queries: newTotalQueries,
+      level: newLevel,
+      badges: newBadges,
+      streak: Math.min(newStreak, 30),
+      last_query_date: today,
+    };
+
+    await api.put('/api/gamification', updatePayload);
 
     setState({
       score: newTotalScore,

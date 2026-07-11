@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
+import { api } from '../lib/api';
 import type { QueryHistoryRow, QueryHistoryInsert } from '../lib/database.types';
 
 interface QueryStats {
@@ -12,15 +12,12 @@ interface QueryStats {
 export function useQueryHistory() {
   const [loading, setLoading] = useState(false);
 
-  const saveQuery = useCallback(async (data: QueryHistoryInsert) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { error: 'Not authenticated' };
+  const saveQuery = useCallback(async (data: Omit<QueryHistoryInsert, 'user_id'>) => {
+    setLoading(true);
+    const { error } = await api.post('/api/history', data);
+    setLoading(false);
 
-    const { error } = await supabase
-      .from('query_history')
-      .insert({ ...data, user_id: user.id });
-
-    if (error) return { error: error.message };
+    if (error) return { error };
     return { error: null };
   }, []);
 
@@ -29,47 +26,39 @@ export function useQueryHistory() {
     limit = 20
   ): Promise<{ data: QueryHistoryRow[]; count: number }> => {
     setLoading(true);
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
-
-    const { data, error, count } = await supabase
-      .from('query_history')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(from, to);
-
+    const { data, error } = await api.get<QueryHistoryRow[]>('/api/history');
     setLoading(false);
-    if (error) return { data: [], count: 0 };
-    return { data: (data ?? []) as QueryHistoryRow[], count: count ?? 0 };
+
+    if (error || !data) return { data: [], count: 0 };
+    
+    // Perform local pagination
+    const from = (page - 1) * limit;
+    const to = from + limit;
+    const paginated = data.slice(from, to);
+
+    return { data: paginated, count: data.length };
   }, []);
 
   const deleteQuery = useCallback(async (id: string) => {
-    const { error } = await supabase
-      .from('query_history')
-      .delete()
-      .eq('id', id);
-    return { error: error?.message ?? null };
+    const { error } = await api.delete(`/api/history/${id}`);
+    return { error };
   }, []);
 
   const getStats = useCallback(async (): Promise<QueryStats> => {
-    const { data } = await supabase
-      .from('query_history')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(100);
+    const { data, error } = await api.get<QueryHistoryRow[]>('/api/history');
 
-    if (!data || data.length === 0) {
+    if (error || !data || data.length === 0) {
       return { totalQueries: 0, averageScore: 0, topDomain: 'general', recentQueries: [] };
     }
 
     const totalQueries = data.length;
     const averageScore = Math.round(
-      data.reduce((s, q) => s + (q as QueryHistoryRow).score, 0) / totalQueries
+      data.reduce((s, q) => s + q.score, 0) / totalQueries
     );
 
     const domainCounts: Record<string, number> = {};
     data.forEach(q => {
-      const d = (q as QueryHistoryRow).domain;
+      const d = q.domain;
       domainCounts[d] = (domainCounts[d] || 0) + 1;
     });
     const topDomain = Object.entries(domainCounts)
@@ -79,7 +68,7 @@ export function useQueryHistory() {
       totalQueries,
       averageScore,
       topDomain,
-      recentQueries: (data.slice(0, 5) as QueryHistoryRow[]),
+      recentQueries: data.slice(0, 5),
     };
   }, []);
 

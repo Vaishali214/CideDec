@@ -1,0 +1,31 @@
+# Environment
+.env
+server/.env
+
+# Database
+database.sqlite
+server/database.sqlite
+
+# Logs
+logs/
+server/logs/
+*.log
+npm-debug.log*
+
+# Node Modules
+node_modules/
+server/node_modules/
+
+# Build
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Supabase local
+.supabase/

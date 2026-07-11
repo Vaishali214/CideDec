@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
+import { api } from '../lib/api';
 import type { ChatSessionRow, ChatMessageRow } from '../lib/database.types';
 
 export function useChatSessions(userId: string | undefined) {
@@ -9,26 +9,18 @@ export function useChatSessions(userId: string | undefined) {
 
   const fetchSessions = useCallback(async () => {
     if (!userId) return;
-    const { data } = await supabase
-      .from('chat_sessions')
-      .select('*')
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false });
-
-    if (data) setSessions(data as ChatSessionRow[]);
+    const { data } = await api.get<{ data: ChatSessionRow[] }>('/api/chats');
+    if (data) setSessions((data as any).data ?? []);
   }, [userId]);
 
   const createSession = useCallback(async (domain = 'general') => {
     if (!userId) return null;
-
-    const { data, error } = await supabase
-      .from('chat_sessions')
-      .insert({ user_id: userId, context_domain: domain })
-      .select()
-      .single();
-
-    if (error || !data) return null;
-    const session = data as ChatSessionRow;
+    const { data } = await api.post<{ data: ChatSessionRow }>('/api/chats', {
+      title: 'New Chat',
+      context_domain: domain,
+    });
+    if (!data) return null;
+    const session = (data as any).data as ChatSessionRow;
     setSessions(prev => [session, ...prev]);
     setActiveSession(session.id);
     setMessages([]);
@@ -36,71 +28,46 @@ export function useChatSessions(userId: string | undefined) {
   }, [userId]);
 
   const fetchMessages = useCallback(async (sessionId: string) => {
-    const { data } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('session_id', sessionId)
-      .order('created_at', { ascending: true });
-
+    const { data } = await api.get<{ data: ChatMessageRow[] }>(`/api/chats/${sessionId}/messages`);
     if (data) {
-      setMessages(data as ChatMessageRow[]);
+      setMessages((data as any).data ?? []);
       setActiveSession(sessionId);
     }
   }, []);
 
   const sendMessage = useCallback(async (sessionId: string, content: string) => {
-    // Insert user message
-    const { data: userMsg } = await supabase
-      .from('chat_messages')
-      .insert({ session_id: sessionId, role: 'user' as const, content })
-      .select()
-      .single();
-
-    if (userMsg) {
-      setMessages(prev => [...prev, userMsg as ChatMessageRow]);
+    const { data } = await api.post<{ data: ChatMessageRow; sessionTitle: string }>(
+      `/api/chats/${sessionId}/messages`,
+      { role: 'user', content }
+    );
+    if (data) {
+      const msg = (data as any).data as ChatMessageRow;
+      setMessages(prev => [...prev, msg]);
+      const newTitle = (data as any).sessionTitle;
+      if (newTitle) {
+        setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, title: newTitle } : s));
+      }
+      return msg;
     }
-
-    // Update session title from first message if still default
-    const sessionData = sessions.find(s => s.id === sessionId);
-    if (sessionData?.title === 'New Chat') {
-      const title = content.length > 50 ? content.slice(0, 50) + '...' : content;
-      await supabase
-        .from('chat_sessions')
-        .update({ title, updated_at: new Date().toISOString() })
-        .eq('id', sessionId);
-
-      setSessions(prev =>
-        prev.map(s => s.id === sessionId ? { ...s, title } : s)
-      );
-    } else {
-      // Just update the timestamp
-      await supabase
-        .from('chat_sessions')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', sessionId);
-    }
-
-    return userMsg as ChatMessageRow;
-  }, [sessions]);
+    return null;
+  }, []);
 
   const saveAssistantMessage = useCallback(async (
     sessionId: string,
     content: string,
     metadata: Record<string, unknown> = {}
   ) => {
-    const { data } = await supabase
-      .from('chat_messages')
-      .insert({ session_id: sessionId, role: 'assistant' as const, content, metadata })
-      .select()
-      .single();
-
+    const { data } = await api.post<{ data: ChatMessageRow }>(
+      `/api/chats/${sessionId}/messages`,
+      { role: 'assistant', content, metadata }
+    );
     if (data) {
-      setMessages(prev => [...prev, data as ChatMessageRow]);
+      setMessages(prev => [...prev, (data as any).data as ChatMessageRow]);
     }
   }, []);
 
   const deleteSession = useCallback(async (sessionId: string) => {
-    await supabase.from('chat_sessions').delete().eq('id', sessionId);
+    await api.delete(`/api/chats/${sessionId}`);
     setSessions(prev => prev.filter(s => s.id !== sessionId));
     if (activeSession === sessionId) {
       setActiveSession(null);

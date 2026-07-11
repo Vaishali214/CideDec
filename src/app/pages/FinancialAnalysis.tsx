@@ -9,50 +9,65 @@ import type { Page } from '../App';
 
 interface FinancialAnalysisProps { onNavigate: (page: Page) => void; }
 
+import { CAREER_DB } from '../../lib/career/engine';
+
+// Calculate aggregated financial profiles dynamically from baseline
+const avgEntrySalary = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salaryEntry, 0) / CAREER_DB.length);
+const avgMidSalary = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salaryMid, 0) / CAREER_DB.length);
+const avgSeniorSalary = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salarySenior, 0) / CAREER_DB.length);
+const avgGrowthRate = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salaryGrowthRate, 0) / CAREER_DB.length);
+
 const financialMetrics = [
   { category: 'Profitability', metrics: [
-    { label: 'Gross Profit Margin', value: '68.4%', status: 'good', benchmark: '60%' },
-    { label: 'Net Profit Margin', value: '22.1%', status: 'good', benchmark: '15%' },
-    { label: 'EBITDA Margin', value: '31.8%', status: 'good', benchmark: '25%' },
-    { label: 'Return on Equity (ROE)', value: '34.2%', status: 'excellent', benchmark: '20%' },
+    { label: 'Avg Senior Salary (LPA)', value: `₹${avgSeniorSalary}L`, status: 'excellent', benchmark: '₹25L' },
+    { label: 'Avg Mid Salary (LPA)', value: `₹${avgMidSalary}L`, status: 'good', benchmark: '₹12L' },
+    { label: 'Avg Entry Salary (LPA)', value: `₹${avgEntrySalary}L`, status: 'good', benchmark: '₹5L' },
+    { label: 'Salary Compound growth', value: `${avgGrowthRate}%`, status: 'good', benchmark: '8%' },
   ]},
   { category: 'Liquidity', metrics: [
-    { label: 'Current Ratio', value: '2.8x', status: 'good', benchmark: '2.0x' },
-    { label: 'Quick Ratio', value: '2.1x', status: 'good', benchmark: '1.5x' },
-    { label: 'Cash Ratio', value: '1.4x', status: 'good', benchmark: '1.0x' },
-    { label: 'Working Capital', value: '₹8.4Cr', status: 'good', benchmark: 'Positive' },
+    { label: 'Entry vs Mid Ratio', value: `${(avgMidSalary / avgEntrySalary).toFixed(1)}x`, status: 'good', benchmark: '2.0x' },
+    { label: 'Mid vs Senior Ratio', value: `${(avgSeniorSalary / avgMidSalary).toFixed(1)}x`, status: 'good', benchmark: '2.0x' },
+    { label: 'Overall Scaling Factor', value: `${(avgSeniorSalary / avgEntrySalary).toFixed(1)}x`, status: 'excellent', benchmark: '4.0x' },
+    { label: 'Growth Stability Index', value: `${Math.round(CAREER_DB.reduce((acc, c) => acc + c.stabilityIndex, 0) / CAREER_DB.length)}/100`, status: 'good', benchmark: 'Positive' },
   ]},
   { category: 'Efficiency', metrics: [
-    { label: 'Asset Turnover', value: '1.82x', status: 'good', benchmark: '1.5x' },
-    { label: 'Receivables Turnover', value: '8.4x', status: 'excellent', benchmark: '6x' },
-    { label: 'Inventory Turnover', value: 'N/A', status: 'neutral', benchmark: 'N/A' },
-    { label: 'Operating Expense Ratio', value: '46.3%', status: 'good', benchmark: '55%' },
+    { label: 'High Demand Share', value: `${Math.round((CAREER_DB.filter(c => c.industryDemand > 80).length / CAREER_DB.length) * 100)}%`, status: 'good', benchmark: '30%' },
+    { label: 'Global Opportunity Index', value: `${Math.round(CAREER_DB.reduce((acc, c) => acc + c.globalOpportunity, 0) / CAREER_DB.length)}/100`, status: 'excellent', benchmark: '60' },
+    { label: 'Learning Efficiency Rate', value: `${Math.round(CAREER_DB.reduce((acc, c) => acc + c.learningDifficulty, 0) / CAREER_DB.length)}%`, status: 'neutral', benchmark: 'N/A' },
+    { label: 'Work Life Quality', value: `${Math.round(CAREER_DB.reduce((acc, c) => acc + c.workLifeBalance, 0) / CAREER_DB.length)}%`, status: 'good', benchmark: '65%' },
   ]},
 ];
 
-const roiData = { investment: 1200, returns: { y1: 480, y2: 840, y3: 1320 }, breakEven: '2.5 years', roi: '187%', npv: '₹92.4L', irr: '34.8%' };
+const roiData = {
+  investment: avgEntrySalary * 2,
+  returns: { y1: avgEntrySalary, y2: avgMidSalary, y3: avgSeniorSalary },
+  breakEven: `${( (avgEntrySalary * 2) / avgMidSalary ).toFixed(1)} years`,
+  roi: `${Math.round(((avgEntrySalary + avgMidSalary + avgSeniorSalary - (avgEntrySalary * 2)) / (avgEntrySalary * 2)) * 100)}%`,
+  npv: `₹${Math.round(avgMidSalary * 4)}L`,
+  irr: `${Math.round(avgGrowthRate * 2.5)}%`
+};
 
 const cashFlowChartData = [
-  { quarter: "Q1'23", operating: 18, investing: -8, financing: 4 },
-  { quarter: "Q2'23", operating: 21, investing: -5, financing: 2 },
-  { quarter: "Q3'23", operating: 24, investing: -12, financing: -3 },
-  { quarter: "Q4'23", operating: 28, investing: -6, financing: 1 },
-  { quarter: "Q1'24", operating: 32, investing: -9, financing: 5 },
-  { quarter: "Q2'24", operating: 38, investing: -14, financing: -2 },
+  { quarter: "Q1'23", operating: avgEntrySalary, investing: -Math.round(avgEntrySalary*0.4), financing: Math.round(avgEntrySalary*0.2) },
+  { quarter: "Q2'23", operating: Math.round(avgEntrySalary*1.2), investing: -Math.round(avgEntrySalary*0.3), financing: Math.round(avgEntrySalary*0.1) },
+  { quarter: "Q3'23", operating: Math.round(avgEntrySalary*1.5), investing: -Math.round(avgEntrySalary*0.6), financing: -Math.round(avgEntrySalary*0.1) },
+  { quarter: "Q4'23", operating: Math.round(avgEntrySalary*1.8), investing: -Math.round(avgEntrySalary*0.3), financing: Math.round(avgEntrySalary*0.05) },
+  { quarter: "Q1'24", operating: Math.round(avgMidSalary*0.8), investing: -Math.round(avgEntrySalary*0.5), financing: Math.round(avgEntrySalary*0.3) },
+  { quarter: "Q2'24", operating: Math.round(avgMidSalary), investing: -Math.round(avgEntrySalary*0.7), financing: -Math.round(avgEntrySalary*0.1) },
 ];
 
 const roiProjectionData = [
-  { year: 'Investment', cost: -1200, revenue: 0, net: -1200 },
-  { year: 'Year 1', cost: -380, revenue: 860, net: 480 },
-  { year: 'Year 2', cost: -340, revenue: 1180, net: 840 },
-  { year: 'Year 3', cost: -310, revenue: 1630, net: 1320 },
+  { year: 'Investment', cost: -(avgEntrySalary * 2), revenue: 0, net: -(avgEntrySalary * 2) },
+  { year: 'Year 1', cost: -Math.round(avgEntrySalary * 0.5), revenue: avgEntrySalary, net: avgEntrySalary - Math.round(avgEntrySalary * 0.5) },
+  { year: 'Year 2', cost: -Math.round(avgEntrySalary * 0.4), revenue: avgMidSalary, net: avgMidSalary - Math.round(avgEntrySalary * 0.4) },
+  { year: 'Year 3', cost: -Math.round(avgEntrySalary * 0.3), revenue: avgSeniorSalary, net: avgSeniorSalary - Math.round(avgEntrySalary * 0.3) },
 ];
 
 const feasibility = [
-  { area: 'Technical Feasibility', score: 88, status: 'High', color: 'bg-green-500', details: 'Proven tech stack, experienced team, scalable architecture' },
-  { area: 'Operational Feasibility', score: 82, status: 'High', color: 'bg-green-500', details: 'Clear processes, trained staff, efficient workflows in place' },
-  { area: 'Financial Feasibility', score: 91, status: 'Very High', color: 'bg-emerald-500', details: 'Positive ROI within 2.5 years, healthy margins, low debt' },
-  { area: 'Market Feasibility', score: 78, status: 'High', color: 'bg-green-500', details: 'Growing TAM, validated demand, competitive pricing' },
+  { area: 'Ecosystem Demand Match', score: Math.round(CAREER_DB.reduce((acc, c) => acc + c.industryDemand, 0) / CAREER_DB.length), status: 'High', color: 'bg-green-500', details: 'Validated sector capacity index and career baseline growth trends' },
+  { area: 'Global Adaptability Rate', score: Math.round(CAREER_DB.reduce((acc, c) => acc + c.globalOpportunity, 0) / CAREER_DB.length), status: 'High', color: 'bg-green-500', details: 'Cross-geographic remote capability and international mobility factors' },
+  { area: 'Income Generation Probability', score: Math.round(CAREER_DB.reduce((acc, c) => acc + c.successProbability, 0) / CAREER_DB.length), status: 'Very High', color: 'bg-emerald-500', details: 'Average path completion rate and career safety parameters' },
+  { area: 'Automation Stability Index', score: 100 - Math.round(CAREER_DB.reduce((acc, c) => acc + c.aiRisk, 0) / CAREER_DB.length), status: 'High', color: 'bg-green-500', details: 'Mitigated artificial intelligence disruption quotient and baseline values' },
 ];
 
 export function FinancialAnalysis({ onNavigate: _onNavigate }: FinancialAnalysisProps) {

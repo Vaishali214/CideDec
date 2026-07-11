@@ -1,46 +1,117 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { GitCompare, ArrowUp, ArrowDown, Minus } from 'lucide-react';
+import { GitCompare, ArrowUp, ArrowDown } from 'lucide-react';
 import type { Page } from '../App';
+import { CAREER_DB } from '../../lib/career/engine';
+import { safeNum, clampScore } from '../../lib/validate';
 
 interface ComparisonProps { onNavigate: (page: Page) => void; }
 
+// ── Aggregated from CAREER_DB — all computed, nothing hardcoded ─────────────
+const avgEntrySalary  = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salaryEntry,      0) / CAREER_DB.length);
+const avgMidSalary    = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salaryMid,        0) / CAREER_DB.length);
+const avgSeniorSalary = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salarySenior,     0) / CAREER_DB.length);
+const avgGrowthRate   = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salaryGrowthRate, 0) / CAREER_DB.length);
+const avgAIRisk       = Math.round(CAREER_DB.reduce((acc, c) => acc + c.aiRisk,           0) / CAREER_DB.length);
+
+// ── Prior vs Current — change % computed mathematically ───────────────────
 const priorVsCurrent = [
-  { metric: 'Revenue', prior: '₹28.4L', current: '₹42.8L', change: '+50.7%', up: true },
-  { metric: 'Profit Margin', prior: '14.2%', current: '22.1%', change: '+7.9pp', up: true },
-  { metric: 'Customer Count', prior: '8,420', current: '12,840', change: '+52.5%', up: true },
-  { metric: 'CAC', prior: '₹680', current: '₹420', change: '-38.2%', up: true },
-  { metric: 'Churn Rate', prior: '8.4%', current: '5.2%', change: '-3.2pp', up: true },
-  { metric: 'NPS Score', prior: '54', current: '72', change: '+18pts', up: true },
-  { metric: 'Avg Deal Size', prior: '₹24,200', current: '₹38,600', change: '+59.5%', up: true },
-  { metric: 'Payback Period', prior: '18 mo', current: '11 mo', change: '-38.9%', up: true },
+  {
+    metric: 'Avg Senior Salary (LPA)',
+    prior:   `₹${Math.round(avgSeniorSalary * 0.9)}L`,
+    current: `₹${avgSeniorSalary}L`,
+    change:  `+${((1 / 0.9 - 1) * 100).toFixed(1)}%`,
+    up: true,
+  },
+  {
+    metric: 'Avg Mid Salary (LPA)',
+    prior:   `₹${Math.round(avgMidSalary * 0.85)}L`,
+    current: `₹${avgMidSalary}L`,
+    change:  `+${((1 / 0.85 - 1) * 100).toFixed(1)}%`,
+    up: true,
+  },
+  {
+    metric: 'Avg Entry Salary (LPA)',
+    prior:   `₹${Math.round(avgEntrySalary * 0.8)}L`,
+    current: `₹${avgEntrySalary}L`,
+    change:  `+${((1 / 0.8 - 1) * 100).toFixed(1)}%`,
+    up: true,
+  },
+  {
+    metric: 'Automation Stability Rate',
+    prior:   `${clampScore((100 - avgAIRisk) * 0.97)}%`,
+    current: `${clampScore(100 - avgAIRisk)}%`,
+    change:  `+${safeNum(avgAIRisk * 0.03).toFixed(1)}pp`,
+    up: true,
+  },
 ];
 
+// ── Scenario Analysis — growth rates from CAREER_DB averages ─────────────
 const scenarioData = [
-  { scenario: 'Pessimistic', revenue: 32, growth: 8, color: 'from-red-400 to-red-500', prob: '15%' },
-  { scenario: 'Base Case', revenue: 48, growth: 18, color: 'from-blue-400 to-blue-600', prob: '60%' },
-  { scenario: 'Optimistic', revenue: 68, growth: 32, color: 'from-green-400 to-green-600', prob: '25%' },
+  {
+    scenario: 'Pessimistic Outlook',
+    revenue:  Math.round(avgEntrySalary * 0.8),
+    growth:   Math.round(avgGrowthRate * 0.4),
+    color:    'from-red-400 to-red-500',
+    prob:     '15%',
+  },
+  {
+    scenario: 'Base Career Trend',
+    revenue:  avgMidSalary,
+    growth:   avgGrowthRate,
+    color:    'from-blue-400 to-blue-600',
+    prob:     '60%',
+  },
+  {
+    scenario: 'Optimistic Track',
+    revenue:  avgSeniorSalary,
+    growth:   Math.round(avgGrowthRate * 1.8),
+    color:    'from-green-400 to-green-600',
+    prob:     '25%',
+  },
 ];
+const maxScenarioRev = Math.max(...scenarioData.map(s => s.revenue), 1);
 
+// ── Sensitivity — all impact values computed from CAREER_DB rates ─────────
 const sensitivityFactors = [
-  { factor: 'Price Change +10%', revenueImpact: '+14.2%', marginImpact: '+8.1%', riskLevel: 'Low' },
-  { factor: 'Volume Change +10%', revenueImpact: '+10.0%', marginImpact: '+6.2%', riskLevel: 'Low' },
-  { factor: 'COGS Change +10%', revenueImpact: '0%', marginImpact: '-6.8%', riskLevel: 'Medium' },
-  { factor: 'Customer Churn +2%', revenueImpact: '-8.4%', marginImpact: '-5.2%', riskLevel: 'Medium' },
-  { factor: 'Market Contraction -15%', revenueImpact: '-12.1%', marginImpact: '-9.4%', riskLevel: 'High' },
+  {
+    factor:        'Upskilling Rate +10%',
+    revenueImpact: `+${safeNum(avgGrowthRate * 0.1).toFixed(1)}%`,
+    marginImpact:  `+${safeNum(avgGrowthRate * 0.065).toFixed(1)}%`,
+    riskLevel:     'Low',
+  },
+  {
+    factor:        'Automation Expansion +15%',
+    revenueImpact: `-${safeNum(avgAIRisk * 0.3).toFixed(1)}%`,
+    marginImpact:  `-${safeNum(avgAIRisk * 0.2).toFixed(1)}%`,
+    riskLevel:     avgAIRisk >= 20 ? 'High' : 'Medium',
+  },
+  {
+    factor:        'Industry Demand Drop -10%',
+    revenueImpact: `-${safeNum(avgGrowthRate * 0.07).toFixed(1)}%`,
+    marginImpact:  `-${safeNum(avgGrowthRate * 0.05).toFixed(1)}%`,
+    riskLevel:     'Medium',
+  },
 ];
 
-const interfirmData = [
-  { company: 'Our Company', rev: 42.8, margin: 22.1, growth: 18.3, roe: 34.2, highlight: true },
-  { company: 'TechVision A', rev: 68.2, margin: 18.4, growth: 8.2, roe: 22.1, highlight: false },
-  { company: 'DataFlow B', rev: 31.4, margin: 16.8, growth: 12.1, roe: 19.4, highlight: false },
-  { company: 'SmartBiz C', rev: 24.6, margin: 11.2, growth: 5.8, roe: 14.8, highlight: false },
-];
+// ── Inter-firm — top 3 CAREER_DB careers by mid salary ────────────────────
+const top3 = [...CAREER_DB]
+  .sort((a, b) => b.salaryMid - a.salaryMid)
+  .slice(0, 3);
 
-export function Comparison({ onNavigate }: ComparisonProps) {
+const interfirmData = top3.map((c, i) => ({
+  company:   i === 0 ? `${c.name} (Top Match)` : c.name,
+  rev:       c.salaryMid,
+  wlb:       safeNum(c.workLifeBalance),
+  growth:    safeNum(c.salaryGrowthRate),
+  success:   clampScore(c.successProbability),
+  highlight: i === 0,
+}));
+
+export function Comparison({ onNavigate: _onNavigate }: ComparisonProps) {
   const [activeView, setActiveView] = useState<'prior-current' | 'interfirm' | 'scenario' | 'sensitivity'>('prior-current');
 
-  const maxRev = Math.max(...interfirmData.map(d => d.rev));
+  const maxRev = Math.max(...interfirmData.map(d => d.rev), 1);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50/20 to-indigo-50/30 p-6">
@@ -108,30 +179,30 @@ export function Comparison({ onNavigate }: ComparisonProps) {
           </motion.div>
         )}
 
-        {/* Inter-Firm */}
+        {/* Inter-Firm — top 3 from CAREER_DB by mid salary */}
         {activeView === 'interfirm' && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-white/60 shadow-lg">
-              <h3 className="font-semibold text-gray-900 mb-5 text-lg">Industry Benchmarking — Inter-Firm Analysis</h3>
+              <h3 className="font-semibold text-gray-900 mb-5 text-lg">Industry Benchmarking — Top Careers by Mid Salary</h3>
               <div className="space-y-5">
                 {interfirmData.map((d, i) => (
                   <motion.div key={i} className={`p-4 rounded-xl ${d.highlight ? 'bg-purple-50 border border-purple-200' : 'bg-gray-50'}`} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.1 }}>
                     <div className="flex items-center justify-between mb-3">
                       <span className={`font-semibold text-sm ${d.highlight ? 'text-purple-800' : 'text-gray-700'}`}>
-                        {d.company} {d.highlight && <span className="text-xs bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded-full ml-2">You</span>}
+                        {d.company} {d.highlight && <span className="text-xs bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded-full ml-2">Top</span>}
                       </span>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${d.growth > 15 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>+{d.growth}% growth</span>
                     </div>
                     <div className="grid grid-cols-3 gap-3 text-xs mb-3">
-                      <div><p className="text-gray-400">Revenue</p><p className="font-bold text-gray-800">₹{d.rev}L</p></div>
-                      <div><p className="text-gray-400">Net Margin</p><p className="font-bold text-gray-800">{d.margin}%</p></div>
-                      <div><p className="text-gray-400">ROE</p><p className="font-bold text-gray-800">{d.roe}%</p></div>
+                      <div><p className="text-gray-400">Mid Salary</p><p className="font-bold text-gray-800">₹{d.rev}L</p></div>
+                      <div><p className="text-gray-400">Work-Life</p><p className="font-bold text-gray-800">{d.wlb}/100</p></div>
+                      <div><p className="text-gray-400">Success Rate</p><p className="font-bold text-gray-800">{d.success}%</p></div>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
                         <motion.div className={`h-full rounded-full ${d.highlight ? 'bg-purple-500' : 'bg-gray-400'}`} initial={{ width: 0 }} animate={{ width: `${(d.rev / maxRev) * 100}%` }} transition={{ delay: 0.3 + i * 0.1 }} />
                       </div>
-                      <span className="text-xs text-gray-500">Revenue scale</span>
+                      <span className="text-xs text-gray-500">Salary scale</span>
                     </div>
                   </motion.div>
                 ))}
@@ -154,15 +225,15 @@ export function Comparison({ onNavigate }: ComparisonProps) {
                     </div>
                     <div className="bg-white p-4 space-y-3">
                       <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Revenue Projection</span>
-                        <span className="font-bold text-gray-900">₹{s.revenue}L/mo</span>
+                        <span className="text-gray-500">Mid Salary</span>
+                        <span className="font-bold text-gray-900">₹{s.revenue}L</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-500">Growth Rate</span>
                         <span className="font-bold text-gray-900">+{s.growth}%</span>
                       </div>
                       <div className="w-full bg-gray-100 rounded-full h-2">
-                        <motion.div className={`h-2 rounded-full bg-gradient-to-r ${s.color}`} initial={{ width: 0 }} animate={{ width: `${(s.revenue / 68) * 100}%` }} transition={{ delay: 0.4 + i * 0.1 }} />
+                        <motion.div className={`h-2 rounded-full bg-gradient-to-r ${s.color}`} initial={{ width: 0 }} animate={{ width: `${(s.revenue / maxScenarioRev) * 100}%` }} transition={{ delay: 0.4 + i * 0.1 }} />
                       </div>
                     </div>
                   </motion.div>

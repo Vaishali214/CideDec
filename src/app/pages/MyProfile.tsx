@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   User, Mail, Phone, Building2, Globe, Save,
@@ -9,18 +9,26 @@ import {
 import { useApp } from '../AppContext';
 import { SettingsPanel } from './SettingsPanel';
 import type { Page } from '../App';
+import { api } from '../../lib/api';
 
 interface MyProfileProps { onNavigate: (page: Page) => void }
 
 export function MyProfile({ onNavigate }: MyProfileProps) {
-  const { currentUser, notifications } = useApp();
+  const { currentUser, notifications, refreshProfile } = useApp();
   const [editing,      setEditing]      = useState(false);
   const [saved,        setSaved]        = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [profileImage, setProfileImage] = useState<string | null>(currentUser?.avatarUrl ?? null);
   const [showPhotoMenu, setShowPhotoMenu] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync avatar URL when currentUser changes
+  useEffect(() => {
+    if (currentUser?.avatarUrl !== undefined) {
+      setProfileImage(currentUser.avatarUrl);
+    }
+  }, [currentUser]);
 
   const initials = currentUser?.fullName
     ? currentUser.fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
@@ -50,7 +58,14 @@ export function MyProfile({ onNavigate }: MyProfileProps) {
     { label: 'Website',      value: fields.website,  key: 'website',  icon: Globe,     type: 'url'   },
   ] as const;
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (currentUser) {
+      await api.put(`/api/profiles/${currentUser.id}`, {
+        full_name: fields.fullName,
+        username: currentUser.username
+      });
+      await refreshProfile();
+    }
     setEditing(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
@@ -61,18 +76,32 @@ export function MyProfile({ onNavigate }: MyProfileProps) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      setProfileImage(ev.target?.result as string);
+    reader.onload = async (ev) => {
+      const base64 = ev.target?.result as string;
+      setProfileImage(base64);
       setShowPhotoMenu(false);
+
+      if (currentUser) {
+        await api.put(`/api/profiles/${currentUser.id}`, {
+          avatar_url: base64
+        });
+        await refreshProfile();
+      }
     };
     reader.readAsDataURL(file);
-    // Reset input so the same file can be re-selected
     e.target.value = '';
   };
 
-  const handleRemovePhoto = () => {
+  const handleRemovePhoto = async () => {
     setProfileImage(null);
     setShowPhotoMenu(false);
+
+    if (currentUser) {
+      await api.put(`/api/profiles/${currentUser.id}`, {
+        avatar_url: null
+      });
+      await refreshProfile();
+    }
   };
 
   const statCards = [
@@ -85,7 +114,7 @@ export function MyProfile({ onNavigate }: MyProfileProps) {
   const unread = notifications.filter(n => !n.read).length;
 
   return (
-    <div className="min-h-screen bg-[#f7f8fa] pb-16">
+    <div className="min-h-screen bg-[#0a0a0a] text-white pb-16">
       {/* Hidden file inputs */}
       <input
         ref={fileInputRef}
@@ -104,70 +133,63 @@ export function MyProfile({ onNavigate }: MyProfileProps) {
       />
 
       {/* Header */}
-      <div className="bg-white border-b border-zinc-100 px-6 py-4">
-        <div className="max-w-3xl mx-auto flex items-center gap-4">
+      <div className="bg-[#0a0a0a] border-b border-zinc-900 px-8 lg:px-16 py-5">
+        <div className="flex items-center gap-5">
           <motion.button
             onClick={() => onNavigate('home')}
-            className="w-9 h-9 flex items-center justify-center rounded-xl text-zinc-500 hover:bg-zinc-100 transition-colors"
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white transition-colors"
             whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
           >
             <ArrowLeft className="w-5 h-5" />
           </motion.button>
           <div>
-            <h1 className="text-[16px] font-extrabold text-black tracking-tight">My Profile</h1>
-            <p className="text-[11px] text-zinc-400 mt-0.5">Manage your account and personal information</p>
+            <h1 className="text-[20px] font-extrabold text-white tracking-tight">My Profile</h1>
+            <p className="text-[13px] text-zinc-500 mt-0.5">Manage your account and personal information</p>
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-3">
             <AnimatePresence>
               {saved && (
                 <motion.div
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-[12px] text-emerald-700 font-semibold"
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-[13px] text-emerald-400 font-semibold"
                   initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.9 }}
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Changes saved
+                  <CheckCircle2 className="w-4 h-4" /> Changes saved
                 </motion.div>
               )}
             </AnimatePresence>
-            <motion.button
-              onClick={() => setShowSettings(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-zinc-200 text-[12px] font-semibold text-zinc-600 hover:bg-zinc-50 shadow-sm transition-colors"
-              whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-            >
-              <Settings className="w-3.5 h-3.5" /> Settings
-            </motion.button>
             {editing ? (
               <motion.button
                 onClick={handleSave}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-700 text-white text-[12px] font-semibold shadow-sm transition-colors"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white hover:bg-zinc-200 text-black text-[14px] font-semibold shadow-sm transition-colors"
                 whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
               >
-                <Save className="w-3.5 h-3.5" /> Save Changes
+                <Save className="w-4 h-4" /> Save Changes
               </motion.button>
             ) : (
               <motion.button
                 onClick={() => setEditing(true)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-700 text-white text-[12px] font-semibold shadow-sm transition-colors"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white hover:bg-zinc-200 text-black text-[14px] font-semibold shadow-sm transition-colors"
                 whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
               >
-                <Edit3 className="w-3.5 h-3.5" /> Edit Profile
+                <Edit3 className="w-4 h-4" /> Edit Profile
               </motion.button>
             )}
           </div>
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-5 sm:px-8 pt-8 space-y-6">
+      <div className="w-full px-8 lg:px-16 pt-8 space-y-6">
 
         {/* ═══ Avatar Card ═══ */}
         <motion.div
-          className="bg-white rounded-2xl border border-zinc-100 shadow-sm p-6 flex items-start gap-5"
+          className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-8 flex items-start gap-7 backdrop-blur-sm relative z-10"
           initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
         >
           {/* Profile photo with upload */}
           <div className="relative shrink-0">
-            <div className="w-[80px] h-[80px] rounded-2xl bg-zinc-900 flex items-center justify-center text-white text-[24px] font-extrabold shadow-lg overflow-hidden">
+            <div className="w-[110px] h-[110px] rounded-2xl bg-zinc-800/80 border border-zinc-700/50 flex items-center justify-center text-white text-[32px] font-extrabold shadow-lg overflow-hidden">
               {profileImage ? (
                 <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
               ) : (
@@ -178,7 +200,7 @@ export function MyProfile({ onNavigate }: MyProfileProps) {
             {/* Camera button */}
             <motion.button
               onClick={() => setShowPhotoMenu(prev => !prev)}
-              className="absolute -bottom-1.5 -right-1.5 w-8 h-8 bg-zinc-900 rounded-full border-2 border-white shadow-md flex items-center justify-center text-white hover:bg-zinc-700 transition-colors"
+              className="absolute -bottom-2 -right-2 w-9 h-9 bg-zinc-900 rounded-full border-2 border-zinc-800 shadow-md flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
               whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
             >
               <Camera className="w-3.5 h-3.5" />
@@ -188,7 +210,7 @@ export function MyProfile({ onNavigate }: MyProfileProps) {
             <AnimatePresence>
               {showPhotoMenu && (
                 <motion.div
-                  className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-zinc-100 overflow-hidden z-50"
+                  className="absolute top-full left-0 mt-2 w-56 bg-zinc-900 rounded-xl shadow-xl border border-zinc-800 overflow-hidden z-[200]"
                   initial={{ opacity: 0, y: -6, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -6, scale: 0.95 }}
@@ -196,27 +218,27 @@ export function MyProfile({ onNavigate }: MyProfileProps) {
                 >
                   <button
                     onClick={() => { cameraInputRef.current?.click(); }}
-                    className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-[12px] font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-[12px] font-medium text-zinc-300 hover:bg-zinc-800 transition-colors"
                   >
-                    <Camera className="w-4 h-4 text-zinc-400" /> Take a photo
+                    <Camera className="w-4 h-4 text-zinc-500" /> Take a photo
                   </button>
                   <button
                     onClick={() => { fileInputRef.current?.click(); }}
-                    className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-[12px] font-medium text-zinc-700 hover:bg-zinc-50 transition-colors border-t border-zinc-50"
+                    className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-[12px] font-medium text-zinc-300 hover:bg-zinc-800 transition-colors border-t border-zinc-800"
                   >
-                    <Upload className="w-4 h-4 text-zinc-400" /> Upload from device
+                    <Upload className="w-4 h-4 text-zinc-500" /> Upload from device
                   </button>
                   {profileImage && (
                     <button
                       onClick={handleRemovePhoto}
-                      className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-[12px] font-medium text-red-600 hover:bg-red-50 transition-colors border-t border-zinc-50"
+                      className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-[12px] font-medium text-red-400 hover:bg-red-950/30 transition-colors border-t border-zinc-800"
                     >
-                      <Trash2 className="w-4 h-4 text-red-400" /> Remove photo
+                      <Trash2 className="w-4 h-4 text-red-500" /> Remove photo
                     </button>
                   )}
                   <button
                     onClick={() => setShowPhotoMenu(false)}
-                    className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-[12px] font-medium text-zinc-400 hover:bg-zinc-50 transition-colors border-t border-zinc-100"
+                    className="w-full flex items-center gap-2.5 px-4 py-3 text-left text-[12px] font-medium text-zinc-500 hover:bg-zinc-800 transition-colors border-t border-zinc-850"
                   >
                     <X className="w-4 h-4" /> Cancel
                   </button>
@@ -227,17 +249,13 @@ export function MyProfile({ onNavigate }: MyProfileProps) {
 
           {/* Profile summary */}
           <div className="flex-1 min-w-0">
-            <h2 className="text-[17px] font-extrabold text-black leading-tight">{fields.fullName}</h2>
-            <p className="text-[12px] text-zinc-500 mt-0.5">{fields.role} · {fields.company}</p>
-            <p className="text-[12px] text-zinc-400 mt-0.5 truncate">{fields.email}</p>
-            <div className="flex items-center gap-2 mt-3.5">
-              <div className="inline-flex items-center gap-1.5 bg-zinc-100 border border-zinc-200 rounded-full px-3 py-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-zinc-900 animate-pulse" />
-                <span className="text-[11px] font-bold text-zinc-700">{currentUser?.plan ?? 'Pro'} Plan · Active</span>
-              </div>
-              <div className="inline-flex items-center gap-1.5 bg-zinc-50 border border-zinc-200 rounded-full px-3 py-1">
-                <MapPin className="w-3 h-3 text-zinc-400" />
-                <span className="text-[11px] font-medium text-zinc-500">{fields.location}</span>
+            <h2 className="text-[22px] font-extrabold text-white leading-tight">{fields.fullName}</h2>
+            <p className="text-[14px] text-zinc-400 mt-1">{fields.role} · {fields.company}</p>
+            <p className="text-[14px] text-zinc-500 mt-0.5 truncate">{fields.email}</p>
+            <div className="flex items-center gap-3 mt-4 flex-wrap">
+              <div className="inline-flex items-center gap-1.5 bg-zinc-900/80 border border-zinc-800 rounded-full px-4 py-1.5">
+                <MapPin className="w-3.5 h-3.5 text-zinc-500" />
+                <span className="text-[13px] font-medium text-zinc-400">{fields.location}</span>
               </div>
             </div>
           </div>
@@ -245,98 +263,47 @@ export function MyProfile({ onNavigate }: MyProfileProps) {
 
         {/* ═══ Statistics ═══ */}
         <motion.div
-          className="grid grid-cols-2 sm:grid-cols-4 gap-3"
+          className="grid grid-cols-2 sm:grid-cols-4 gap-4"
           initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
         >
           {statCards.map((s, i) => (
-            <div key={i} className="bg-white rounded-2xl p-4 border border-zinc-100 shadow-sm text-center">
-              <p className="text-[24px] font-extrabold text-black leading-none">{s.value}</p>
-              <p className="text-[11px] text-zinc-400 font-medium mt-1.5">{s.label}</p>
+            <div key={i} className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 text-center backdrop-blur-sm hover:border-zinc-700 transition-all">
+              <p className="text-[32px] font-extrabold text-white leading-none">{s.value}</p>
+              <p className="text-[13px] text-zinc-500 font-medium mt-2">{s.label}</p>
             </div>
           ))}
         </motion.div>
 
-        {/* ═══ Subscription Plan ═══ */}
-        <motion.div
-          className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden"
-          initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.12 }}
-        >
-          <div className="px-5 py-4 border-b border-zinc-100 flex items-center justify-between">
-            <div>
-              <p className="text-[12px] font-extrabold text-black uppercase tracking-wider">Subscription Plan</p>
-              <p className="text-[11px] text-zinc-400 mt-0.5">Manage your billing and subscription</p>
-            </div>
-            <div className="inline-flex items-center gap-1.5 bg-zinc-900 text-white rounded-full px-3 py-1">
-              <CreditCard className="w-3 h-3" />
-              <span className="text-[11px] font-bold">{currentUser?.plan ?? 'Pro'}</span>
-            </div>
-          </div>
-          <div className="px-5 py-4">
-            <div className="flex items-baseline gap-1 mb-1">
-              <span className="text-[28px] font-extrabold text-black">₹4,999</span>
-              <span className="text-[13px] text-zinc-400">/month</span>
-            </div>
-            <p className="text-[12px] text-zinc-500 mb-4">Renews on 12 August 2025 · Auto-renewal ON</p>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 mb-5">
-              {['Unlimited queries & analysis', 'All 6 analytics modules', 'Export reports (PDF/Excel)', 'Priority support'].map((f, i) => (
-                <div key={i} className="flex items-center gap-2 text-[12px] text-zinc-600">
-                  <div className="w-4 h-4 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                  </div>
-                  {f}
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-3">
-              <motion.button
-                onClick={() => setShowSettings(true)}
-                className="flex-1 py-2.5 rounded-xl border border-zinc-200 text-[12px] font-semibold text-zinc-600 hover:bg-zinc-50 transition-colors"
-                whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-              >
-                Manage Billing
-              </motion.button>
-              <motion.button
-                onClick={() => setShowSettings(true)}
-                className="flex-1 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-700 text-white text-[12px] font-semibold shadow-sm transition-colors"
-                whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
-              >
-                Upgrade Plan
-              </motion.button>
-            </div>
-          </div>
-        </motion.div>
-
         {/* ═══ Personal Information ═══ */}
         <motion.div
-          className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden"
+          className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl overflow-hidden backdrop-blur-sm"
           initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
         >
-          <div className="px-5 py-4 border-b border-zinc-100">
-            <p className="text-[12px] font-extrabold text-black uppercase tracking-wider">Personal Information</p>
-            <p className="text-[11px] text-zinc-400 mt-0.5">Your private details — only visible to you</p>
+          <div className="px-6 py-5 border-b border-zinc-800/80">
+            <p className="text-[13px] font-extrabold text-white uppercase tracking-wider">Personal Information</p>
+            <p className="text-[12px] text-zinc-500 mt-0.5">Your private details — only visible to you</p>
           </div>
-          <div className="divide-y divide-zinc-50">
+          <div className="divide-y divide-zinc-900">
             {personalFields.map((f, i) => {
               const FIcon = f.icon;
               return (
-                <div key={i} className="flex items-center gap-4 px-5 py-4">
-                  <div className="w-9 h-9 rounded-xl bg-zinc-100 flex items-center justify-center shrink-0">
-                    <FIcon className="w-4 h-4 text-zinc-500" />
+                <div key={i} className="flex items-center gap-5 px-6 py-5">
+                  <div className="w-11 h-11 rounded-xl bg-zinc-900/80 border border-zinc-800 flex items-center justify-center shrink-0">
+                    <FIcon className="w-5 h-5 text-zinc-400" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">{f.label}</p>
+                    <p className="text-[11px] text-zinc-500 font-semibold uppercase tracking-wider mb-1.5">{f.label}</p>
                     {editing ? (
                       <input
                         type={f.type}
                         value={fields[f.key]}
                         onChange={e => setFields(prev => ({ ...prev, [f.key]: e.target.value }))}
-                        className="w-full text-[13px] font-medium text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-zinc-300 focus:border-zinc-400 transition-all"
+                        className="w-full text-[15px] font-medium text-zinc-200 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 outline-none focus:border-zinc-500 transition-all"
                       />
                     ) : (
-                      <p className="text-[13px] font-medium text-zinc-800 truncate">{f.value}</p>
+                      <p className="text-[15px] font-medium text-zinc-200 truncate">{f.value}</p>
                     )}
                   </div>
                 </div>
@@ -347,33 +314,33 @@ export function MyProfile({ onNavigate }: MyProfileProps) {
 
         {/* ═══ Professional Information ═══ */}
         <motion.div
-          className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden"
+          className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl overflow-hidden backdrop-blur-sm"
           initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
         >
-          <div className="px-5 py-4 border-b border-zinc-100">
-            <p className="text-[12px] font-extrabold text-black uppercase tracking-wider">Professional Information</p>
-            <p className="text-[11px] text-zinc-400 mt-0.5">Company and role details</p>
+          <div className="px-6 py-5 border-b border-zinc-800/80">
+            <p className="text-[13px] font-extrabold text-white uppercase tracking-wider">Professional Information</p>
+            <p className="text-[12px] text-zinc-500 mt-0.5">Company and role details</p>
           </div>
-          <div className="divide-y divide-zinc-50">
+          <div className="divide-y divide-zinc-900">
             {professionalFields.map((f, i) => {
               const FIcon = f.icon;
               return (
-                <div key={i} className="flex items-center gap-4 px-5 py-4">
-                  <div className="w-9 h-9 rounded-xl bg-zinc-100 flex items-center justify-center shrink-0">
-                    <FIcon className="w-4 h-4 text-zinc-500" />
+                <div key={i} className="flex items-center gap-5 px-6 py-5">
+                  <div className="w-11 h-11 rounded-xl bg-zinc-900/80 border border-zinc-800 flex items-center justify-center shrink-0">
+                    <FIcon className="w-5 h-5 text-zinc-400" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">{f.label}</p>
+                    <p className="text-[11px] text-zinc-500 font-semibold uppercase tracking-wider mb-1.5">{f.label}</p>
                     {editing ? (
                       <input
                         type={f.type}
                         value={fields[f.key]}
                         onChange={e => setFields(prev => ({ ...prev, [f.key]: e.target.value }))}
-                        className="w-full text-[13px] font-medium text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-zinc-300 focus:border-zinc-400 transition-all"
+                        className="w-full text-[15px] font-medium text-zinc-200 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 outline-none focus:border-zinc-500 transition-all"
                       />
                     ) : (
-                      <p className="text-[13px] font-medium text-zinc-800 truncate">{f.value}</p>
+                      <p className="text-[15px] font-medium text-zinc-200 truncate">{f.value}</p>
                     )}
                   </div>
                 </div>
@@ -381,55 +348,27 @@ export function MyProfile({ onNavigate }: MyProfileProps) {
             })}
 
             {/* Bio */}
-            <div className="flex items-start gap-4 px-5 py-4">
-              <div className="w-9 h-9 rounded-xl bg-zinc-100 flex items-center justify-center shrink-0 mt-0.5">
-                <Edit3 className="w-4 h-4 text-zinc-500" />
+            <div className="flex items-start gap-5 px-6 py-5">
+              <div className="w-11 h-11 rounded-xl bg-zinc-900/80 border border-zinc-800 flex items-center justify-center shrink-0 mt-0.5">
+                <Edit3 className="w-5 h-5 text-zinc-400" />
               </div>
               <div className="flex-1">
-                <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider mb-1">Bio</p>
+                <p className="text-[11px] text-zinc-500 font-semibold uppercase tracking-wider mb-1.5">Bio</p>
                 {editing ? (
                   <textarea
                     value={fields.bio}
                     onChange={e => setFields(prev => ({ ...prev, bio: e.target.value }))}
                     rows={3}
-                    className="w-full text-[13px] font-medium text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-zinc-300 focus:border-zinc-400 transition-all resize-none"
+                    className="w-full text-[15px] font-medium text-zinc-200 bg-zinc-950 border border-zinc-800 rounded-lg px-4 py-2.5 outline-none focus:border-zinc-500 transition-all resize-none"
                   />
                 ) : (
-                  <p className="text-[13px] font-medium text-zinc-600 leading-relaxed">{fields.bio}</p>
+                  <p className="text-[15px] font-medium text-zinc-300 leading-relaxed">{fields.bio}</p>
                 )}
               </div>
             </div>
           </div>
         </motion.div>
 
-        {/* ═══ Quick Access ═══ */}
-        <motion.div
-          className="grid grid-cols-1 sm:grid-cols-3 gap-3"
-          initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-        >
-          {[
-            { icon: ShieldCheck, label: 'Privacy & Security', desc: '2FA enabled · E2E encrypted',             action: () => onNavigate('privacy')      },
-            { icon: Bell,        label: 'Notifications',      desc: `${unread} unread alert${unread !== 1 ? 's' : ''}`,  action: () => setShowSettings(true) },
-            { icon: CreditCard,  label: 'Billing & Plan',     desc: `${currentUser?.plan ?? 'Pro'} · Renews Aug 2025`,   action: () => setShowSettings(true) },
-          ].map((t, i) => {
-            const TIcon = t.icon;
-            return (
-              <motion.button
-                key={i}
-                onClick={t.action}
-                className="bg-white rounded-2xl p-5 border border-zinc-100 shadow-sm cursor-pointer hover:shadow-md transition-all text-left group"
-                whileHover={{ y: -2 }}
-              >
-                <div className="w-10 h-10 rounded-xl bg-zinc-100 text-zinc-600 flex items-center justify-center mb-3 group-hover:bg-zinc-900 group-hover:text-white transition-colors">
-                  <TIcon style={{ width: 18, height: 18 }} />
-                </div>
-                <p className="text-[13px] font-bold text-black mb-0.5">{t.label}</p>
-                <p className="text-[11px] text-zinc-400">{t.desc}</p>
-              </motion.button>
-            );
-          })}
-        </motion.div>
       </div>
 
       {/* Settings panel */}

@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  cidedec-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cidedec_production_app
+    ports:
+      - "80:3001"
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+      - JWT_SECRET=cidedec-prod-super-secure-jwt-key-2026-dynamic-flow-composed
+      - DATABASE_FILE=database.sqlite
+      - GEMINI_MODEL=gemini-1.5-flash
+      - AI_PROVIDER=gemini
+      - ENABLE_GEMINI=true
+      - ENABLE_JOB_API=true
+      - ENABLE_ANALYTICS=true
+      - ENABLE_GAMIFICATION=true
+    volumes:
+      - cidedec_data:/app/server
+      - cidedec_uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  cidedec_data:
+  cidedec_uploads:

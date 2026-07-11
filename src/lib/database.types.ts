@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════
-   Supabase Database Types
-   Auto-generate later with: npx supabase gen types typescript
-   For now these are hand-written to match our schema.
+   CideDec Database Types
+   Hand-written to match the SQLite schema defined in server/db.js.
+   Update these types whenever the schema changes.
 ═══════════════════════════════════════════════ */
 
 export interface Profile {
@@ -31,8 +31,9 @@ export interface QueryHistoryRow {
   created_at: string;
 }
 
-export type QueryHistoryInsert = Omit<QueryHistoryRow, 'id' | 'created_at'>;
-
+export type QueryHistoryInsert = Partial<
+  Omit<QueryHistoryRow, 'id' | 'created_at'>
+>;
 export interface NotificationRow {
   id: string;
   user_id: string;

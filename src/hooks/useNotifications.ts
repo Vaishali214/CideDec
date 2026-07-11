@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
+import { api } from '../lib/api';
 import type { NotificationRow } from '../lib/database.types';
-import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export function useNotifications(userId: string | undefined) {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
@@ -11,18 +10,11 @@ export function useNotifications(userId: string | undefined) {
 
   const fetchNotifications = useCallback(async () => {
     if (!userId) return;
-    setLoading(true);
-
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(20);
-
+    
+    const { data, error } = await api.get<NotificationRow[]>('/api/notifications');
     setLoading(false);
     if (!error && data) {
-      setNotifications(data as NotificationRow[]);
+      setNotifications(data);
     }
   }, [userId]);
 
@@ -31,39 +23,30 @@ export function useNotifications(userId: string | undefined) {
   ) => {
     if (!userId) return;
 
-    const { data: inserted, error } = await supabase
-      .from('notifications')
-      .insert({ user_id: userId, ...data })
-      .select()
-      .single();
+    const { data: inserted, error } = await api.post<NotificationRow>('/api/notifications', data);
 
     if (!error && inserted) {
-      setNotifications(prev => [inserted as NotificationRow, ...prev].slice(0, 20));
+      setNotifications(prev => [inserted, ...prev].slice(0, 20));
     }
   }, [userId]);
 
   const markAllRead = useCallback(async () => {
     if (!userId) return;
 
-    await supabase
-      .from('notifications')
-      .update({ read: true })
-      .eq('user_id', userId)
-      .eq('read', false);
-
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    const { error } = await api.put('/api/notifications/read-all');
+    if (!error) {
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    }
   }, [userId]);
 
   const markRead = useCallback(async (id: string) => {
-    await supabase
-      .from('notifications')
-      .update({ read: true })
-      .eq('id', id);
-
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    const { error } = await api.put(`/api/notifications/${id}/read`);
+    if (!error) {
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    }
   }, []);
 
-  // Fetch on mount + subscribe to real-time inserts
+  // Fetch on mount + poll every 15 seconds to simulate real-time updates
   useEffect(() => {
     if (!userId) {
       setNotifications([]);
@@ -73,30 +56,12 @@ export function useNotifications(userId: string | undefined) {
 
     fetchNotifications();
 
-    let channel: RealtimeChannel | undefined;
-    try {
-      channel = supabase
-        .channel(`notif-${userId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'notifications',
-            filter: `user_id=eq.${userId}`,
-          },
-          (payload) => {
-            const newNotif = payload.new as NotificationRow;
-            setNotifications(prev => [newNotif, ...prev].slice(0, 20));
-          }
-        )
-        .subscribe();
-    } catch {
-      // Realtime not available — graceful fallback
-    }
+    const interval = setInterval(() => {
+      fetchNotifications();
+    }, 15000);
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      clearInterval(interval);
     };
   }, [userId, fetchNotifications]);
 

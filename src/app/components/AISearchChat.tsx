@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Send, Sparkles, X, Bot, User, TrendingUp, DollarSign, BarChart3, Zap } from 'lucide-react';
+import { Search, Send, Sparkles, X, Bot, User, BookOpen, GraduationCap, BarChart3, Lightbulb } from 'lucide-react';
 import type { Suggestion } from './SmartSuggestions';
 
 interface Message {
@@ -16,65 +16,67 @@ interface AISearchChatProps {
 }
 
 const quickPrompts = [
-  { label: 'ROI Analysis', icon: DollarSign, query: 'What is our ROI and break-even timeline?' },
-  { label: 'Market Trends', icon: TrendingUp, query: 'What are the current market trends?' },
-  { label: 'Risk Score', icon: BarChart3, query: 'What is our overall risk score?' },
-  { label: 'Top Strategy', icon: Zap, query: 'What is the #1 strategic recommendation?' },
+  { label: 'Computer Science', icon: BarChart3, query: 'Show insights for Computer Science education field' },
+  { label: 'Mathematics', icon: GraduationCap, query: 'Show insights for Mathematics education field' },
+  { label: 'Data Science & AI', icon: Lightbulb, query: 'Show insights for Data Science and AI education field' },
+  { label: 'Medical & Health', icon: BookOpen, query: 'Show insights for Medical and Health education field' },
+  { label: 'Business & MBA', icon: BarChart3, query: 'Show insights for Business and MBA education field' },
+  { label: 'Engineering', icon: GraduationCap, query: 'Show insights for Engineering education field' },
 ];
 
 const analyticsResponses: Record<string, { content: string; chips?: string[] }> = {
   roi: {
-    content: "📈 ROI Analysis: Based on current financials, your 3-year projected ROI is 187% on a ₹1,200L investment. Year 1 returns ₹480L (40%), Year 2 ₹840L (70%), Year 3 ₹1,320L (110%). Break-even point: 2.5 years. IRR stands at 34.8% — classified as Highly Attractive. NPV = ₹92.4L.",
-    chips: ['View Financial Analysis', 'Break-Even Chart', 'Cash Flow'],
+    content: "📈 Marketing ROI Analysis: Your edtech platform's 3-year projected ROI is 194% on a ₹800L campaign investment. Year 1 returns ₹320L (40%), Year 2 ₹560L (70%), Year 3 ₹960L (120%). Student acquisition cost (SAC) = ₹1,200 — 18% below industry average. Break-even: 2.2 years. Highest-performing channel: YouTube + SEO (ROI 3.8x).",
+    chips: ['Channel Breakdown', 'SAC Trends', 'Campaign Performance'],
   },
   market: {
-    content: "🌐 Market Intelligence: Total Addressable Market = ₹4,200Cr growing at 22.4% CAGR. Your current share is 24.6% (Rank #2). Key opportunity: ₹180Cr untapped rural segment. Top competitor holds 32.1% — but their NPS is only 58 vs your 72. Predictive model forecasts your share reaching 27.2% by Q4 2024.",
-    chips: ['SWOT Analysis', 'Competitor Matrix', 'Market Forecast'],
+    content: "🌐 EdTech Market Intelligence: India's EdTech TAM = ₹7,500Cr growing at 28.6% CAGR. AI-powered learning segment growing fastest at 41% YoY. K-12 online tuition leads with 38% share, followed by skill-based upskilling at 27%. Key opportunity: vernacular language content — only 12% of platforms serve non-English learners. Your NPS: 74 vs industry avg 58.",
+    chips: ['Segment Analysis', 'Vernacular Opportunity', 'Competitor Map'],
   },
   risk: {
-    content: "🛡 Risk Dashboard: Overall composite risk score = 38/100 (Manageable). Breakdown: Talent Retention 62 (High — needs ESOP revision), Regulatory 55 (Moderate), Market Saturation 42, Customer Concentration 47. Lowest risk: Financial Liquidity at 18/100 — current ratio 2.8x. Primary action: talent retention program.",
-    chips: ['Full Risk Analysis', 'Mitigation Plan', 'AI Insights'],
+    content: "🛡 Education Platform Risk Score: 34/100 (Low–Moderate). Breakdown: Content Quality Consistency 58 (High — needs QA automation), Regulatory/NEP Compliance 44 (Moderate), Student Retention 39, Teacher Supply Risk 51. Lowest risk: Payment Infrastructure at 16/100. Primary recommendation: implement AI-based content audit pipeline.",
+    chips: ['Full Risk Report', 'Compliance Checklist', 'Retention Strategy'],
   },
   strategy: {
-    content: "🧠 #1 Strategic Recommendation: Accelerate Rural Market Expansion. AI confidence: 87%. Opportunity: ₹180Cr untapped market with 34% lower CAC. Deploy lightweight mobile-first product for Tier 3–4 markets. Partner with Jan Dhan network (4.2Cr+ accounts). Projected uplift: +₹38L/month within 18 months.",
-    chips: ['All Recommendations', 'Implementation Plan', 'AI Insights'],
+    content: "🧠 #1 Strategic Recommendation: Launch AI-Personalized Learning Paths. AI confidence: 91%. Opportunity: 63% of students drop courses due to one-size-fits-all content. Adaptive learning reduces dropout by 47% and improves completion rates to 82%. Projected uplift: +₹52L/month ARR within 12 months. Integrate with existing LMS in 6–8 weeks.",
+    chips: ['Implementation Plan', 'Personalization Engine', 'AI Insights'],
   },
-  mvp: {
-    content: "🚀 MVP Strategy: Focus your MVP on the single core feature delivering maximum value. Ship in 6–8 weeks using an agile sprint approach. Key data: MVPs reduce development cost by avg 60%, accelerate learning by 4x, and dramatically improve product-market fit validation speed. Projected ROI on MVP approach: 480% over 12 months.",
-    chips: ['MVP Roadmap', 'Feature Prioritization', 'Market Analysis'],
+  sales: {
+    content: "📊 5-Year Sales Forecast (EdTech): Year 1: ₹48Cr | Year 2: ₹81Cr (+69%) | Year 3: ₹128Cr (+58%) | Year 4: ₹189Cr (+48%) | Year 5: ₹264Cr (+40%). Drivers: rising internet penetration in Tier 2/3 cities, NEP 2020 digital push, corporate L&D adoption. Subscription model projected to contribute 72% of revenue by Year 5.",
+    chips: ['Revenue Model', 'Growth Drivers', 'Cohort Forecast'],
   },
-  funding: {
-    content: "💰 Funding Strategy Analysis: Given your current metrics (22.1% margin, ₹42.8L MRR, 18.3% growth), you're positioned for Series A/B at ₹80–120Cr valuation. Bootstrap path: maximum control, 24+ months runway. Angel route: ₹5–15Cr at ₹40–60Cr valuation. VC route: ₹30–80Cr+ but requires 20–25% equity dilution.",
-    chips: ['Financial Analysis', 'Investor Deck Tips', 'Cash Flow'],
+  bias: {
+    content: "⚖️ Bias Detection in Education Data: Key bias types found — Representation Bias (rural students underrepresented at 11% vs 40% of target population), Algorithmic Bias (recommendation engine favors English-medium content 3.2x), Assessment Bias (MCQ format disadvantages visual learners). Recommended fixes: diverse training data, fairness-aware ML models, multi-modal assessments.",
+    chips: ['Bias Audit Report', 'Fairness Metrics', 'Dataset Diversity'],
   },
-  swot: {
-    content: "⚖️ SWOT Summary: STRENGTHS — 3 AI patents, 94% retention, ₹420 CAC. WEAKNESSES — Limited rural presence, ₹2.1Cr/month infra cost. OPPORTUNITIES — Digital India initiative, ₹180Cr rural market, 40+ bank partnerships. THREATS — 3 new funded entrants in Q1 2024, talent shortage, regulatory uncertainty.",
-    chips: ['Full SWOT', 'Market Analysis', 'Risk Analysis'],
+  curriculum: {
+    content: "📚 Curriculum Intelligence: Top-performing courses by completion rate — Data Science (84%), Digital Marketing (79%), Python Basics (91%). Weakest: Financial Modelling (38%) — needs video refresh + mentorship. Skill gap analysis shows: Cloud Computing, Prompt Engineering, and UI/UX Design are most searched but least available on your platform.",
+    chips: ['Course Analytics', 'Skill Gap Report', 'Content Roadmap'],
   },
-  comparison: {
-    content: "📊 YoY Performance: Revenue +50.7% (₹28.4L → ₹42.8L), Profit Margin +7.9pp (14.2% → 22.1%), Customer Count +52.5%, CAC improved -38.2% (₹680 → ₹420), NPS +18pts (54 → 72), Churn Rate -3.2pp. All 8 tracked metrics improved — exceptional execution. Ranked #1 in growth rate vs 4 competitors.",
-    chips: ['Comparison Dashboard', 'Competitor Analysis', 'Financial Analysis'],
+  student: {
+    content: "🎓 Student Engagement Dashboard: DAU/MAU ratio = 0.38 (healthy). Avg session duration: 24.6 mins (+8% MoM). Drop-off hotspot: Week 3 of long-form courses (42% churn). Top engagement driver: live doubt-solving sessions (94% satisfaction). Cohort analysis shows students who join study groups have 2.7x better completion rates.",
+    chips: ['Engagement Heatmap', 'Dropout Analysis', 'Cohort Study'],
   },
-  financial: {
-    content: "💹 Financial Health: Gross Margin 68.4% (vs 60% benchmark), Net Margin 22.1%, EBITDA 31.8%, ROE 34.2%. Liquidity: Current Ratio 2.8x, Quick Ratio 2.1x — both excellent. Efficiency: Asset Turnover 1.82x, Receivables Turnover 8.4x. Cash flow from operations trending strongly: ₹18L → ₹38L over 6 quarters.",
-    chips: ['Financial Dashboard', 'Ratio Analysis', 'Cash Flow Charts'],
+  teacher: {
+    content: "👩‍🏫 Educator Performance Insights: Top 10% of instructors drive 68% of course completions. Avg instructor rating: 4.3/5. Key differentiator for high-rated teachers: responsiveness to queries (<2hr reply time) + weekly live sessions. Recommendation: introduce 'Mentor Score' badge and tiered revenue sharing to retain top educators.",
+    chips: ['Instructor Leaderboard', 'Quality Standards', 'Revenue Share Model'],
   },
 };
 
 function generateAIResponse(query: string): { content: string; chips?: string[] } {
   const q = query.toLowerCase();
-  if (q.includes('roi') || q.includes('return') || q.includes('break') || q.includes('invest')) return analyticsResponses.roi;
-  if (q.includes('market') || q.includes('trend') || q.includes('tam') || q.includes('share')) return analyticsResponses.market;
-  if (q.includes('risk') || q.includes('score') || q.includes('threat') || q.includes('danger')) return analyticsResponses.risk;
-  if (q.includes('strategy') || q.includes('recommend') || q.includes('#1') || q.includes('top')) return analyticsResponses.strategy;
-  if (q.includes('mvp') || q.includes('minimum') || q.includes('product')) return analyticsResponses.mvp;
-  if (q.includes('fund') || q.includes('investor') || q.includes('capital') || q.includes('vc') || q.includes('money')) return analyticsResponses.funding;
-  if (q.includes('swot') || q.includes('strength') || q.includes('weakness') || q.includes('opport')) return analyticsResponses.swot;
-  if (q.includes('compar') || q.includes('prior') || q.includes('last year') || q.includes('yoy')) return analyticsResponses.comparison;
-  if (q.includes('financial') || q.includes('margin') || q.includes('profit') || q.includes('cash')) return analyticsResponses.financial;
+  if (q.includes('roi') || q.includes('return') || q.includes('marketing') || q.includes('campaign')) return analyticsResponses.roi;
+  if (q.includes('market') || q.includes('trend') || q.includes('tam') || q.includes('edtech')) return analyticsResponses.market;
+  if (q.includes('risk') || q.includes('score') || q.includes('bias detection') || q.includes('compliance')) return analyticsResponses.risk;
+  if (q.includes('strategy') || q.includes('recommend') || q.includes('personali') || q.includes('top')) return analyticsResponses.strategy;
+  if (q.includes('sales') || q.includes('predict') || q.includes('forecast') || q.includes('5 year') || q.includes('revenue')) return analyticsResponses.sales;
+  if (q.includes('bias') || q.includes('fair') || q.includes('diversity') || q.includes('represent')) return analyticsResponses.bias;
+  if (q.includes('curriculum') || q.includes('course') || q.includes('content') || q.includes('skill gap')) return analyticsResponses.curriculum;
+  if (q.includes('student') || q.includes('engagement') || q.includes('dropout') || q.includes('completion')) return analyticsResponses.student;
+  if (q.includes('teacher') || q.includes('instructor') || q.includes('educator') || q.includes('mentor')) return analyticsResponses.teacher;
   return {
-    content: "🤖 DecisionAI here! I can provide instant insights on: ROI & financials, market trends & SWOT, risk scores, competitor analysis, funding strategies, prior vs current performance, and AI recommendations. What would you like to explore? Try asking about our risk score, market share, or top strategic recommendation.",
-    chips: ['ROI Analysis', 'Market Trends', 'Risk Score', 'Top Strategy'],
+    content: "🎓 EduAI here! I can provide instant insights on: marketing ROI, edtech market trends, sales forecasts, bias detection, curriculum gaps, student engagement, and instructor performance. What would you like to explore? Try asking about market trends in AI, how to detect bias in data, or predicting sales for the next 5 years.",
+    chips: ['Analyze marketing ROI', 'Market trends in AI', 'Predict sales next 5 years', 'Detect bias in data'],
   };
 }
 
@@ -121,7 +123,7 @@ export function AISearchChat({ suggestions: _suggestions }: AISearchChatProps) {
               onChange={e => setQuery(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               onFocus={() => setIsExpanded(true)}
-              placeholder="Ask DecisionAI — ROI, market trends, risk score, strategy..."
+              placeholder="Ask anything — marketing ROI, market trends, risk score..."
               className="flex-1 bg-transparent outline-none text-gray-700 placeholder:text-gray-400 text-sm" />
             <AnimatePresence>
               {query && (
@@ -138,7 +140,9 @@ export function AISearchChat({ suggestions: _suggestions }: AISearchChatProps) {
       </motion.div>
 
       {/* Quick Prompt Pills */}
-      <motion.div className="flex flex-wrap gap-2 justify-center mt-3" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}>
+      <motion.div className="mt-3" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}>
+        <div className="flex flex-wrap items-center gap-2 justify-center">
+          <span className="text-xs text-gray-400 font-medium">Try:</span>
         {quickPrompts.map((p) => {
           const PIcon = p.icon;
           return (
@@ -149,6 +153,7 @@ export function AISearchChat({ suggestions: _suggestions }: AISearchChatProps) {
             </motion.button>
           );
         })}
+        </div>
       </motion.div>
 
       {/* Chat Panel */}
@@ -167,8 +172,8 @@ export function AISearchChat({ suggestions: _suggestions }: AISearchChatProps) {
                       <Bot className="w-4 h-4 text-white" />
                     </div>
                     <div>
-                      <p className="font-semibold text-gray-800 text-sm">DecisionAI Assistant</p>
-                      <p className="text-xs text-gray-400">Analytics-powered intelligence</p>
+                      <p className="font-semibold text-gray-800 text-sm">EduAI Assistant</p>
+                      <p className="text-xs text-gray-400">Education intelligence platform</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -229,7 +234,7 @@ export function AISearchChat({ suggestions: _suggestions }: AISearchChatProps) {
                   <div className="flex gap-2">
                     <input value={query} onChange={e => setQuery(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') handleSend(); }}
-                      placeholder="Ask a follow-up..."
+                      placeholder="Ask a follow-up about education..."
                       className="flex-1 text-sm bg-white border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-blue-400 text-gray-700 placeholder:text-gray-400" />
                     <motion.button onClick={() => handleSend()}
                       className="px-3 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl"

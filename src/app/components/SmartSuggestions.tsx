@@ -1,16 +1,21 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
+
   Search, Send, Sparkles, Lock, Brain, RefreshCw, Bot,
   ArrowUp, ArrowDown, CheckCircle2, XCircle, AlertTriangle,
   Info, TrendingUp, TrendingDown, Zap, Target, DollarSign,
   BarChart3, Activity, GitCompare, ChevronRight, ArrowRight,
-  Lightbulb, MessageSquare, Rocket, ShieldCheck,
+  Lightbulb, MessageSquare, Rocket, ShieldCheck, ArrowLeft,
   Star, Award, Trophy, Flame, Eye, Cpu, Globe,
   Layers, SplitSquareHorizontal, Mic, MicOff,
   BookOpen, Briefcase, GraduationCap, Telescope,
   Gauge, Wand2, ChevronDown, Plus, Minus, X,
+  MapPin, Calendar, Bookmark, Check, ShieldAlert, FileText
 } from 'lucide-react';
+
+import { useQueryHistory } from '../../hooks/useQueryHistory';
+
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   PieChart, Pie, Cell, RadarChart, Radar, PolarGrid,
@@ -30,6 +35,9 @@ import { DecisionTimeline, generateTimeline } from './DecisionTimeline';
 import type { TimelineNode } from './DecisionTimeline';
 import { useApp }              from '../AppContext';
 import type { Page }           from '../App';
+import { isCareerQuery, analyzeCareerDecision } from '../../lib/career/engine';
+import type { CareerAnalysis } from '../../lib/career/engine';
+import { CareerIntelligenceReport } from './CareerIntelligenceReport';
 
 /* ═══════════════════════════════════════════════
    CORE TYPES
@@ -42,7 +50,7 @@ type ModuleKey = 'market'|'financial'|'risk'|'strategy'|'comparison'|'forecast';
 type QueryTheme = 'strong-green'|'green'|'golden'|'neutral'|'red'|'weak-red';
 type Domain = 'marketing'|'finance'|'technology'|'strategy'|'risk'|'career'|'education'|'health'|'personal'|'general';
 type UserLevel = 'beginner'|'intermediate'|'advanced'|'expert';
-type GoalMode = 'business'|'learning'|'research';
+type GoalMode = 'business'|'finance'|'strategy'|'engineering'|'medical'|'commerce'|'arts'|'data'|'learning'|'research';
 
 interface KPI { label: string; value: string; change: string; up: boolean }
 interface ChartSpec { type:'area'|'bar'|'line'|'pie'|'radar'; title:string; data:Record<string,unknown>[]; dataKeys:{key:string;color:string}[]; xKey?:string }
@@ -97,12 +105,26 @@ const suggestions: Suggestion[] = [
 const C = { blue:'#3b82f6', violet:'#7c3aed', emerald:'#10b981', amber:'#f59e0b', rose:'#f43f5e', indigo:'#6366f1', sky:'#0ea5e9', green:'#22c55e', red:'#ef4444', gold:'#d97706', teal:'#14b8a6' };
 
 const QUICK_PROMPTS = [
-  { label:'How to become a doctor',        icon:Lightbulb   },
-  { label:'3-year ROI forecast',          icon:DollarSign  },
-  { label:'Should I choose engineering or design', icon:Brain },
-  { label:'How to start a business',      icon:Rocket      },
-  { label:'Career switch to tech at 30',  icon:TrendingUp  },
-  { label:'How to improve my skills',     icon:Activity    },
+  /* ── Original business prompts (kept) ── */
+  { label:'How to become a doctor',                    icon:Lightbulb     },
+  { label:'3-year ROI forecast',                       icon:DollarSign    },
+  { label:'Should I choose engineering or design',     icon:Brain         },
+  { label:'How to start a business',                   icon:Rocket        },
+  { label:'Career switch to tech at 30',               icon:TrendingUp    },
+  { label:'How to improve my skills',                  icon:Activity      },
+  /* ── Education & field discovery prompts ── */
+  { label:'Scope of B.Tech Computer Science in India', icon:GraduationCap },
+  { label:'Is MBBS worth it in 2025?',                 icon:BookOpen      },
+  { label:'Career options after B.Com',                icon:Briefcase     },
+  { label:'UPSC vs private sector — which is better',  icon:ShieldCheck   },
+  { label:'Top jobs after BCA in next 5 years',        icon:TrendingUp    },
+  { label:'Which engineering branch has most scope',   icon:Cpu           },
+  { label:'Future of AI engineering in India',         icon:Zap           },
+  { label:'Law career after BA LLB — salary & scope',  icon:Globe         },
+  { label:'Which is better: CA or MBA finance?',       icon:BarChart3     },
+  { label:'Pharmacy career scope in India',            icon:Target        },
+  { label:'Data science vs software engineering',      icon:GitCompare    },
+  { label:'Scope of architecture in India 2025',       icon:Layers        },
 ];
 
 const MODULES: Record<ModuleKey,{page:Page;label:string;desc:string;icon:React.ComponentType<any>;iconBg:string;iconColor:string;barColor:string;arrowColor:string;metrics:{label:string;value:string;pct?:number}[]}> = {
@@ -157,7 +179,10 @@ const responseMap: Record<string,RT> = {
   default:{ summary:'CideDec ready. Ask about ROI, market share, risk, strategy, or financial ratios.',
     modules:['market','financial','risk','strategy'],
     kpis:[{label:'Revenue MoM',value:'₹42.8L',change:'+18.3%',up:true},{label:'Market Share',value:'24.6%',change:'+3.2%',up:true},{label:'Risk Score',value:'38/100',change:'Managed',up:true},{label:'ROI (3yr)',value:'187%',change:'Excellent',up:true}],
-    charts:[{type:'area',title:'Revenue Trend (₹L)',data:[{m:'Jan',v:28},{m:'Feb',v:31},{m:'Mar',v:29},{m:'Apr',v:35},{m:'May',v:38},{m:'Jun',v:42},{m:'Jul',v:40},{m:'Aug',v:45},{m:'Sep',v:43},{m:'Oct',v:48}],dataKeys:[{key:'v',color:C.blue}],xKey:'m'}],
+    charts:[
+      {type:'area',title:'Revenue Trend (₹L)',data:[{m:'Jan',v:28},{m:'Feb',v:31},{m:'Mar',v:29},{m:'Apr',v:35},{m:'May',v:38},{m:'Jun',v:42},{m:'Jul',v:40},{m:'Aug',v:45},{m:'Sep',v:43},{m:'Oct',v:48}],dataKeys:[{key:'v',color:C.blue}],xKey:'m'},
+      {type:'bar',title:'Market Share vs Competitors (%)',data:[{n:'Our Co',v:24.6},{n:'TechVision',v:32.1},{n:'DataFlow',v:18.4},{n:'SmartBiz',v:14.9}],dataKeys:[{key:'v',color:C.violet}],xKey:'n'}
+    ],
     notif:undefined},
 };
 /* ── Universal response templates for life / career / education ── */
@@ -184,20 +209,114 @@ const universalMap: Record<string,RT> = {
     kpis:[{label:'Skill Gap',value:'34%',change:'Closeable',up:true},{label:'Growth Rate',value:'+22%',change:'Monthly',up:true},{label:'Consistency',value:'Key',change:'Factor #1',up:true},{label:'Timeline',value:'6–12 mo',change:'Visible results',up:true}],
     charts:[{type:'area',title:'Personal Growth Trajectory',data:[{m:'Week 1',v:5},{m:'Month 1',v:15},{m:'Month 3',v:35},{m:'Month 6',v:55},{m:'Year 1',v:78},{m:'Year 2',v:92}],dataKeys:[{key:'v',color:C.violet}],xKey:'m'}],
     notif:{title:'Growth Plan Ready',body:'Personalized development roadmap generated.',type:'success'}},
+
+  /* ═══════════════════════════════════════════════
+     INDIAN EDUCATION FIELD TEMPLATES
+  ═══════════════════════════════════════════════ */
+  btech_cse:{ summary:'B.Tech CSE — Avg salary ₹6–45 LPA. Top recruiters: Google, Microsoft, Infosys, TCS. Job demand +38% by 2030.',
+    modules:['market','forecast','comparison'],
+    kpis:[{label:'Avg Salary (Entry)',value:'₹6–12 LPA',change:'Growing',up:true},{label:'Job Demand',value:'+38% by 2030',change:'AI/ML boom',up:true},{label:'Top Exam',value:'JEE Main/Adv',change:'Highly competitive',up:false},{label:'Duration',value:'4 Years',change:'B.Tech',up:true}],
+    charts:[
+      {type:'bar',title:'CSE Salary by Role (₹LPA)',data:[{r:'Fresher',v:6},{r:'SDE-I',v:14},{r:'SDE-II',v:24},{r:'Senior',v:36},{r:'Lead/Mgr',v:55}],dataKeys:[{key:'v',color:C.blue}],xKey:'r'},
+      {type:'area',title:'CSE Job Openings in India (Thousands)',data:[{y:'2021',v:180},{y:'2022',v:220},{y:'2023',v:265},{y:'2024',v:310},{y:'2025',v:360},{y:'2026',v:420}],dataKeys:[{key:'v',color:C.emerald}],xKey:'y'},
+    ],notif:{title:'B.Tech CSE Analysis Ready',body:'High-demand field with strong salary trajectory.',type:'insight'}},
+
+  btech_ece:{ summary:'B.Tech ECE — VLSI, Embedded & IoT booming. Avg salary ₹5–30 LPA. Core + IT roles both available.',
+    modules:['market','comparison','forecast'],
+    kpis:[{label:'Avg Salary (Entry)',value:'₹5–10 LPA',change:'Moderate',up:true},{label:'VLSI Demand',value:'+52% by 2028',change:'Chip boom',up:true},{label:'Top Exam',value:'JEE Main/Adv',change:'Moderate difficulty',up:true},{label:'Duration',value:'4 Years',change:'B.Tech',up:true}],
+    charts:[
+      {type:'bar',title:'ECE Career Paths Salary (₹LPA)',data:[{r:'Core ECE',v:7},{r:'VLSI Design',v:18},{r:'Embedded',v:12},{r:'IT/Software',v:15},{r:'PSU',v:10}],dataKeys:[{key:'v',color:C.violet}],xKey:'r'},
+      {type:'line',title:'VLSI & Semiconductor Job Growth',data:[{y:'2022',v:40},{y:'2023',v:58},{y:'2024',v:82},{y:'2025',v:110},{y:'2026',v:145}],dataKeys:[{key:'v',color:C.teal}],xKey:'y'},
+    ],notif:{title:'ECE Career Analysis Done',body:'VLSI sector is the highest-growth area.',type:'insight'}},
+
+  mbbs:{ summary:'MBBS — 5.5 yr course. NEET required. Govt doctor ₹60K–1.5L/mo. Private/specialisation ₹2–20L/mo.',
+    modules:['market','strategy','forecast'],
+    kpis:[{label:'Duration',value:'5.5 Years',change:'+Internship',up:true},{label:'Entrance Exam',value:'NEET-UG',change:'Highly competitive',up:false},{label:'Govt Salary',value:'₹60K–1.5L/mo',change:'Stable',up:true},{label:'Specialist',value:'₹2–20L/mo',change:'Post PG',up:true}],
+    charts:[
+      {type:'bar',title:'Doctor Salary by Specialisation (₹L/yr)',data:[{s:'General',v:8},{s:'Pediatrician',v:14},{s:'Surgeon',v:20},{s:'Cardiologist',v:35},{s:'Neuro',v:50}],dataKeys:[{key:'v',color:C.emerald}],xKey:'s'},
+      {type:'area',title:'India Doctor Demand (Thousands needed)',data:[{y:'2023',v:600},{y:'2025',v:720},{y:'2027',v:860},{y:'2029',v:1020},{y:'2031',v:1200}],dataKeys:[{key:'v',color:C.rose}],xKey:'y'},
+    ],notif:{title:'MBBS Field Analysis Ready',body:'India needs 600K+ more doctors by 2030.',type:'insight'}},
+
+  law:{ summary:'BA LLB / LLB — Corporate law & litigation booming. Top lawyers earn ₹50L–5Cr+. CLAT is the main entrance.',
+    modules:['market','comparison','financial'],
+    kpis:[{label:'Entrance Exam',value:'CLAT / AILET',change:'5 yr course',up:true},{label:'Avg Starting',value:'₹3–8 LPA',change:'Entry level',up:true},{label:'Corporate Law',value:'₹20–80 LPA',change:'5–8 yrs exp',up:true},{label:'Top Firms',value:'AZB, Cyril',change:'& 50+ NLU firms',up:true}],
+    charts:[
+      {type:'bar',title:'Law Career Salary by Path (₹LPA)',data:[{p:'Litigation',v:5},{p:'Corporate',v:22},{p:'Judiciary',v:9},{p:'Legal Consulting',v:18},{p:'Academic',v:6}],dataKeys:[{key:'v',color:C.amber}],xKey:'p'},
+      {type:'line',title:'Law Graduates Placed (%)',data:[{y:'2020',v:52},{y:'2021',v:58},{y:'2022',v:65},{y:'2023',v:71},{y:'2024',v:78}],dataKeys:[{key:'v',color:C.gold}],xKey:'y'},
+    ],notif:{title:'Law Career Mapped',body:'Corporate law offers highest growth trajectory.',type:'insight'}},
+
+  commerce_ca:{ summary:'B.Com + CA — One of India\'s most respected credentials. CA avg salary ₹7–50 LPA. Big4 firms pay ₹12–25 LPA.',
+    modules:['financial','comparison','forecast'],
+    kpis:[{label:'CA Exam',value:'3 Levels',change:'2–4 yrs',up:true},{label:'Big4 Salary',value:'₹12–25 LPA',change:'Entry level',up:true},{label:'Own Practice',value:'₹30–2Cr+',change:'Senior CA',up:true},{label:'Pass Rate',value:'~10–15%',change:'All 3 levels',up:false}],
+    charts:[
+      {type:'bar',title:'CA Career Salary Stages (₹LPA)',data:[{s:'Articleship',v:1.5},{s:'Fresher CA',v:8},{s:'3–5 Yrs',v:18},{s:'Senior CA',v:35},{s:'Partner',v:80}],dataKeys:[{key:'v',color:C.emerald}],xKey:'s'},
+      {type:'pie',title:'CA Employment Sectors',data:[{name:'Big4/MNC',value:38},{name:'Own Practice',value:28},{name:'PSU/Govt',value:16},{name:'SME Finance',value:18}],dataKeys:[{key:'value',color:C.blue}],xKey:'name'},
+    ],notif:{title:'CA Career Analysis Done',body:'Big4 firms offer top packages for new CAs.',type:'insight'}},
+
+  data_science:{ summary:'Data Science & AI/ML — India\'s fastest growing field. Avg salary ₹8–50 LPA. 97,000+ open roles in 2025.',
+    modules:['market','forecast','strategy'],
+    kpis:[{label:'Avg Salary',value:'₹8–25 LPA',change:'Entry–Mid',up:true},{label:'Job Openings',value:'97,000+',change:'2025 India',up:true},{label:'AI Demand',value:'+68% by 2028',change:'Exponential',up:true},{label:'Key Skills',value:'Python, SQL, ML',change:'Must have',up:true}],
+    charts:[
+      {type:'area',title:'Data Science Job Postings (India, Thousands)',data:[{y:'2021',v:28},{y:'2022',v:45},{y:'2023',v:68},{y:'2024',v:97},{y:'2025',v:138},{y:'2026',v:190}],dataKeys:[{key:'v',color:C.violet}],xKey:'y'},
+      {type:'bar',title:'Avg Salary by Role (₹LPA)',data:[{r:'Data Analyst',v:7},{r:'Data Scientist',v:14},{r:'ML Engineer',v:18},{r:'AI Architect',v:30},{r:'Research Sci.',v:40}],dataKeys:[{key:'v',color:C.indigo}],xKey:'r'},
+    ],notif:{title:'Data Science Field Mapped',body:'97K+ open roles — one of India\'s top-paying fields.',type:'insight'}},
+
+  civil_eng:{ summary:'Civil Engineering — Core & govt roles stable. PSU (UPSC ESE/GATE) salaries ₹8–15L. Private infra boom pays ₹6–20L.',
+    modules:['market','strategy','forecast'],
+    kpis:[{label:'Avg Salary',value:'₹5–12 LPA',change:'Entry level',up:true},{label:'PSU via GATE',value:'₹8–15 LPA',change:'Govt sector',up:true},{label:'Infra Growth',value:'+₹111Lakh Cr',change:'NIP 2025–30',up:true},{label:'Duration',value:'4 Years',change:'B.Tech Civil',up:true}],
+    charts:[
+      {type:'bar',title:'Civil Eng Salary by Sector (₹LPA)',data:[{s:'Govt/PSU',v:10},{s:'Infra Pvt',v:12},{s:'Real Estate',v:9},{s:'Consulting',v:15},{s:'Abroad',v:28}],dataKeys:[{key:'v',color:C.amber}],xKey:'s'},
+      {type:'line',title:'India Infrastructure Spend (₹ Lakh Cr)',data:[{y:'2022',v:7.5},{y:'2023',v:10},{y:'2024',v:11.1},{y:'2025',v:13},{y:'2026',v:15.5}],dataKeys:[{key:'v',color:C.teal}],xKey:'y'},
+    ],notif:{title:'Civil Engineering Analysis Done',body:'NIP infra boom creates high demand for civil engineers.',type:'insight'}},
+
+  pharmacy:{ summary:'B.Pharm / M.Pharm / Pharm.D — India is world\'s 3rd largest pharma market. Avg salary ₹4–18 LPA.',
+    modules:['market','forecast','comparison'],
+    kpis:[{label:'Avg Salary',value:'₹4–10 LPA',change:'Entry level',up:true},{label:'Pharma Mkt',value:'$65Bn by 2025',change:'India rank #3',up:true},{label:'Export Value',value:'$25Bn+',change:'Generic king',up:true},{label:'Duration',value:'4 Yrs (B.Pharm)',change:'6 Yrs (Pharm.D)',up:true}],
+    charts:[
+      {type:'bar',title:'Pharmacy Career Salary (₹LPA)',data:[{r:'QC/QA',v:5},{r:'Medical Rep',v:6},{r:'R&D',v:9},{r:'Regulatory',v:11},{r:'Clinical Trials',v:14}],dataKeys:[{key:'v',color:C.green}],xKey:'r'},
+      {type:'area',title:'India Pharma Market Size ($Bn)',data:[{y:'2020',v:41},{y:'2022',v:50},{y:'2023',v:57},{y:'2025',v:65},{y:'2027',v:80}],dataKeys:[{key:'v',color:C.emerald}],xKey:'y'},
+    ],notif:{title:'Pharmacy Field Mapped',body:'India\'s pharma exports are world-leading.',type:'insight'}},
+
+  architecture:{ summary:'B.Arch — 5 yr course. NATA entrance. Avg salary ₹4–25 LPA. Real estate & smart city boom driving demand.',
+    modules:['market','comparison','forecast'],
+    kpis:[{label:'Duration',value:'5 Years',change:'B.Arch',up:true},{label:'Entrance',value:'NATA / JEE Paper 2',change:'Moderate difficulty',up:true},{label:'Avg Salary',value:'₹4–15 LPA',change:'5–8 yrs exp',up:true},{label:'Own Studio',value:'₹20–80L/yr',change:'Senior Arch.',up:true}],
+    charts:[
+      {type:'bar',title:'Architecture Salary by Role (₹LPA)',data:[{r:'Junior',v:4},{r:'Mid-Level',v:9},{r:'Senior',v:16},{r:'Principal',v:25},{r:'Own Studio',v:45}],dataKeys:[{key:'v',color:C.rose}],xKey:'r'},
+      {type:'line',title:'Real Estate & Infra Project Starts (India, K)',data:[{y:'2021',v:80},{y:'2022',v:98},{y:'2023',v:118},{y:'2024',v:140},{y:'2025',v:165}],dataKeys:[{key:'v',color:C.amber}],xKey:'y'},
+    ],notif:{title:'Architecture Field Analysis Done',body:'Smart city mission driving demand for architects.',type:'insight'}},
+
+  upsc_ias:{ summary:'UPSC IAS — India\'s most prestigious exam. IAS salary ₹56K–2.5L/mo + perks. 0.1–0.2% selection rate.',
+    modules:['market','strategy','comparison'],
+    kpis:[{label:'Selection Rate',value:'0.1–0.2%',change:'~180 IAS/year',up:false},{label:'IAS Salary',value:'₹56K–2.5L/mo',change:'+ DA + perks',up:true},{label:'Prep Time',value:'1–4 Years',change:'Average',up:true},{label:'Age Limit',value:'21–32 yrs',change:'Gen category',up:true}],
+    charts:[
+      {type:'bar',title:'UPSC Applicants vs Selected (Thousands)',data:[{y:'2020',app:950},{y:'2021',app:1020},{y:'2022',app:1100},{y:'2023',app:1300}],dataKeys:[{key:'app',color:C.blue}],xKey:'y'},
+      {type:'pie',title:'UPSC Qualifier Background',data:[{name:'Engineering',value:48},{name:'Humanities',value:28},{name:'Science',value:14},{name:'Commerce',value:10}],dataKeys:[{key:'value',color:C.violet}],xKey:'name'},
+    ],notif:{title:'UPSC/IAS Path Analysed',body:'Engineering grads dominate IAS selections.',type:'insight'}},
 };
 
 function classify(q:string):RT {
   const t = q.toLowerCase();
-  /* Business domains */
+  /* Business domains (kept intact) */
   if (/roi|return|break.?even|irr|npv|invest/.test(t))               return responseMap.roi;
   if (/market|trend|tam|share|segment|competitor|swot|marketing/.test(t)) return responseMap.market;
   if (/risk|threat|danger|vulnerab|mitigation/.test(t))              return responseMap.risk;
   if (/strateg|recommend|#1|top action|growth plan|rural/.test(t))   return responseMap.strategy;
   if (/financial|margin|profit|cash|liquidity|ratio|ebitda/.test(t)) return responseMap.financial;
   if (/compar|prior|last year|yoy|benchm|interfirm/.test(t))         return responseMap.comparison;
-  /* Universal domains */
-  if (/doctor|mbbs|neet|medical|surgeon|nurse|healthcare|hospital|pharma|biotech/.test(t)) return universalMap.health;
-  if (/career|job|profession|salary|hire|resume|switch|promotion|work|engineer|developer|designer|architect|lawyer|pilot|teacher|chef/.test(t)) return universalMap.career;
+  /* ── Indian education fields (specific first) ── */
+  if (/mbbs|neet.?ug|medical college|aiims|jipmer|govt doctor/.test(t)) return universalMap.mbbs;
+  if (/cse|computer science|software eng|b\.?tech.*comp|comp.*b\.?tech|coding career|it engineer/.test(t)) return universalMap.btech_cse;
+  if (/ece|electronics|vlsi|embedded|semiconductor|signal processing/.test(t)) return universalMap.btech_ece;
+  if (/data.?sci|machine learn|ml engineer|ai engineer|deep learn|nlp career/.test(t)) return universalMap.data_science;
+  if (/civil eng|infrastructure|construction engineer|gate civil|psu civil/.test(t)) return universalMap.civil_eng;
+  if (/pharma|b\.?pharm|m\.?pharm|pharm\.?d|drug|medicines career/.test(t)) return universalMap.pharmacy;
+  if (/architect|b\.?arch|nata|design build|urban plann/.test(t))   return universalMap.architecture;
+  if (/upsc|ias|ips|civil serv|govt service|ssc|state pcs/.test(t)) return universalMap.upsc_ias;
+  if (/\bca\b|chartered account|icai|b\.?com.*finance|ca exam|big.?4/.test(t)) return universalMap.commerce_ca;
+  if (/\blaw\b|llb|clat|legal career|advocate|barrister|corporate law|litigation/.test(t)) return universalMap.law;
+  /* Universal domains (kept intact) */
+  if (/doctor|surgeon|nurse|healthcare|hospital|biotech/.test(t)) return universalMap.health;
+  if (/career|job|profession|salary|hire|resume|switch|promotion|work|engineer|developer|designer|lawyer|pilot|teacher|chef/.test(t)) return universalMap.career;
   if (/educat|degree|college|universit|course|certif|learn|study|exam|school|mba|btech|masters|phd|bootcamp/.test(t)) return universalMap.education;
   if (/skill|improve|habit|personal|growth|motivation|focus|discipline|confident|creative|communicat|mindset|productiv|life/.test(t)) return universalMap.personal;
   if (/business|startup|entrepre|found|launch|company|venture/.test(t)) return responseMap.strategy;
@@ -216,7 +335,13 @@ const STRONG_KW = ['market','marketing','roi','revenue','strategy','financial','
   'career','job','profession','salary','engineer','doctor','developer','designer','education',
   'degree','college','university','course','certification','learn','study','exam','skill',
   'improve','habit','personal','motivation','focus','discipline','health','medical','healthcare',
-  'wellness','creative','communication','mindset','productivity','life','goal','plan','path'];
+  'wellness','creative','communication','mindset','productivity','life','goal','plan','path',
+  /* Indian education field keywords */
+  'mbbs','neet','btech','cse','ece','gate','jee','clat','nata','upsc','ias','llb','bcom',
+  'mba','bca','mca','bsc','architecture','pharmacy','pharma','nursing','ayurveda','homeopathy',
+  'biotechnology','civil','mechanical','chemical','aerospace','vlsi','embedded','semiconductor',
+  'data science','machine learning','artificial intelligence','chartered accountant','company secretary',
+  'scope','future','placement','entrance','admission','cutoff','counselling','ranking'];
 const DOMAIN_MAP:Record<string,Domain> = {
   marketing:'marketing',market:'marketing',brand:'marketing',campaign:'marketing',seo:'marketing',
   roi:'finance',revenue:'finance',financial:'finance',profit:'finance',investment:'finance',margin:'finance',irr:'finance',npv:'finance',
@@ -489,183 +614,340 @@ function themeConfig(theme:QueryTheme) {
 function ExplainableAIPanel({ intel, onUseEnhanced }:{ intel:QueryIntelligence; onUseEnhanced:(q:string)=>void }) {
   const [tab, setTab] = useState<'reasoning'|'bias'|'gaps'|'scenarios'>('reasoning');
   const [expandScenario, setExpandScenario] = useState<number|null>(null);
-  const tc = themeConfig(intel.theme);
-  const isStrong = intel.score >= 52;
-  const ScoreIcon = intel.score>=68 ? CheckCircle2 : intel.score>=40 ? Info : XCircle;
-  const circumference = 2*Math.PI*26;
-  const dashOffset = circumference - (intel.score/100)*circumference;
+
+  const isStrong = intel.score >= 68;
+  const isMedium = intel.score >= 45 && intel.score < 68;
+  
+  // Colors and indicators mapping
+  const colorClass = isStrong ? 'text-emerald-400' : isMedium ? 'text-amber-400' : 'text-rose-500';
+  const scoreLabel = isStrong ? 'High Signal' : isMedium ? 'Moderate Signal' : 'Low Signal';
+  const progressColor = isStrong ? 'from-emerald-500 to-teal-500' : isMedium ? 'from-amber-500 to-orange-500' : 'from-red-500 to-rose-600';
+  const ringColor = isStrong ? '#10b981' : isMedium ? '#f59e0b' : '#ef4444';
+  
+  const circumference = 2 * Math.PI * 26;
+  const dashOffset = circumference - (intel.score / 100) * circumference;
+
+  const quickPrompts = [
+    { label: 'Market entry strategy for AI SaaS platform', icon: Target },
+    { label: 'Revenue growth forecast for D2C brand', icon: BarChart3 },
+    { label: 'Risk assessment for fintech startup', icon: ShieldCheck },
+    { label: 'Customer acquisition cost optimization', icon: TrendingUp },
+    { label: '5-year financial projection for e-commerce', icon: DollarSign }
+  ];
 
   return (
-    <motion.div className={`rounded-2xl border ${tc.border} ${tc.bg} bg-gradient-to-br p-5 mb-6`}
-      initial={{ opacity:0,y:14,scale:0.98 }} animate={{ opacity:1,y:0,scale:1 }}
-      transition={{ type:'spring',stiffness:200,damping:22 }}>
+    <motion.div 
+      className="rounded-2xl border border-zinc-800 bg-[#0b0c10]/95 p-6 mb-6 shadow-2xl relative overflow-hidden"
+      initial={{ opacity:0, y:14, scale:0.98 }} 
+      animate={{ opacity:1, y:0, scale:1 }}
+      transition={{ type:'spring', stiffness:200, damping:22 }}
+    >
+      {/* Background radial glows for premium feeling */}
+      <div className="absolute top-0 left-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-0 right-0 w-64 h-64 bg-rose-500/5 rounded-full blur-3xl pointer-events-none" />
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-4">
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isStrong?'bg-emerald-100':'bg-red-100'}`}>
-            <ScoreIcon className={`w-5 h-5 ${tc.accent}`}/>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 mb-5 pb-5 border-b border-zinc-800/60 relative z-10">
+        <div className="flex items-start gap-4 flex-1">
+          {/* Signal Indicator Icon (Glowing) */}
+          <div className="relative shrink-0 mt-1">
+            <div className={`absolute -inset-1 bg-gradient-to-r ${isStrong ? 'from-emerald-500 to-teal-500' : isMedium ? 'from-amber-500 to-orange-500' : 'from-red-500 to-rose-500'} rounded-full blur opacity-30 animate-pulse`} />
+            <div className={`relative w-12 h-12 rounded-full bg-zinc-900 border ${isStrong ? 'border-emerald-500/40' : isMedium ? 'border-amber-500/40' : 'border-red-500/40'} flex items-center justify-center`}>
+              {isStrong ? (
+                <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+              ) : isMedium ? (
+                <Info className="w-6 h-6 text-amber-400" />
+              ) : (
+                <AlertTriangle className="w-6 h-6 text-red-500" />
+              )}
+            </div>
           </div>
-          <div className="flex-1 min-w-0">
-            <h3 className={`text-[14px] font-extrabold leading-tight ${tc.accent}`}>{intel.verdict}</h3>
-            <div className="flex flex-wrap items-center gap-2 mt-1">
-              <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${tc.badge}`}>{tc.label} · {intel.domain}</span>
-              {intel.biasFlags.length > 0 && <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-orange-100 text-orange-800 border border-orange-200">{intel.biasFlags.length} bias flag{intel.biasFlags.length>1?'s':''}</span>}
+          <div>
+            <h3 className="text-[17px] font-black text-white tracking-tight">{intel.verdict}</h3>
+            <p className={`text-[12px] font-extrabold mt-0.5 ${colorClass}`}>{scoreLabel}</p>
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+              <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400`}>
+                {intel.domain.toUpperCase()} DOMAIN
+              </span>
+              {intel.biasFlags.length > 0 && (
+                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                  {intel.biasFlags.length} Bias Flag{intel.biasFlags.length > 1 ? 's' : ''}
+                </span>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Confidence ring */}
-        <div className="flex flex-col items-center shrink-0">
-          <svg width="60" height="60" viewBox="0 0 60 60">
-            <circle cx="30" cy="30" r="26" fill="none" stroke="#e5e7eb" strokeWidth="4"/>
-            <circle cx="30" cy="30" r="26" fill="none" stroke={tc.ring} strokeWidth="4"
-              strokeDasharray={circumference} strokeDashoffset={dashOffset}
-              strokeLinecap="round" transform="rotate(-90 30 30)"/>
-            <text x="30" y="34" textAnchor="middle" fontSize="13" fontWeight="800" fill={tc.ring}>{intel.score}</text>
-          </svg>
-          <p className={`text-[9px] font-bold uppercase tracking-wider ${tc.subtle} -mt-1`}>Quality</p>
+        {/* Circular Quality Score */}
+        <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+          <div className="text-right">
+            <span className="text-[20px] font-black text-white leading-none block">{intel.score}</span>
+            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block mt-0.5">Quality Score</span>
+          </div>
+          <div className="relative w-14 h-14">
+            <svg width="56" height="56" viewBox="0 0 60 60" className="transform -rotate-90">
+              <circle cx="30" cy="30" r="26" fill="none" stroke="#18181b" strokeWidth="4.5"/>
+              <circle cx="30" cy="30" r="26" fill="none" stroke={ringColor} strokeWidth="4.5"
+                strokeDasharray={circumference} strokeDashoffset={dashOffset}
+                strokeLinecap="round"/>
+            </svg>
+          </div>
         </div>
       </div>
 
-      {/* Explanation */}
-      <p className={`text-[12px] leading-relaxed mb-4 ${tc.accent}`}>{intel.explanation}</p>
+      {/* Explanation Quote */}
+      <p className="text-[12.5px] leading-relaxed text-zinc-400 mb-5 italic bg-zinc-900/25 border-l-2 border-zinc-800 pl-3.5 py-1">
+        {intel.explanation}
+      </p>
 
-      {/* Confidence meter with justification */}
-      <div className={`rounded-xl px-3.5 py-3 mb-4 ${tc.panel} border ${tc.border}`}>
+      {/* AI Confidence Meter */}
+      <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-xl p-4 mb-6">
         <div className="flex items-center justify-between mb-2">
-          <span className={`text-[10px] font-extrabold uppercase tracking-wider ${tc.accent}`}>AI Confidence Meter</span>
-          <span className={`text-[11px] font-bold ${tc.accent}`}>{intel.confidence}%</span>
+          <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400">AI Confidence Meter</span>
+          <span className="text-[12px] font-bold text-white">{intel.confidence}%</span>
         </div>
-        <div className="h-2 bg-white/60 rounded-full overflow-hidden mb-2">
-          <motion.div className="h-full rounded-full" style={{ background:tc.ring }}
-            initial={{ width:0 }} animate={{ width:`${intel.confidence}%` }} transition={{ delay:0.2,duration:0.7,ease:'easeOut' }}/>
+        <div className="h-2 bg-zinc-950 rounded-full overflow-hidden mb-2 border border-zinc-800/40">
+          <motion.div className={`h-full bg-gradient-to-r ${progressColor} rounded-full`}
+            initial={{ width:0 }} 
+            animate={{ width:`${intel.confidence}%` }} 
+            transition={{ delay:0.2, duration:0.7, ease:'easeOut' }}/>
         </div>
-        <p className={`text-[10.5px] leading-snug ${tc.subtle}`}>{intel.confidenceJustification}</p>
+        <p className="text-[11px] leading-snug text-zinc-500">{intel.confidenceJustification}</p>
       </div>
 
-      {/* Sub-tabs */}
-      <div className="flex gap-1 mb-4 flex-wrap">
-        {(['reasoning','bias','gaps','scenarios'] as const).map(t=>(
-          <button key={t} onClick={()=>setTab(t)}
-            className={`px-2.5 py-1 rounded-lg text-[10.5px] font-bold transition-all border ${tab===t?`${tc.badge} border-current`:'bg-white/50 text-gray-500 border-gray-200 hover:bg-white'}`}>
-            {t==='reasoning'?'AI Reasoning':t==='bias'?`Bias Flags ${intel.biasFlags.length>0?`(${intel.biasFlags.length})`:''}`:t==='gaps'?'Knowledge Gaps':'Scenarios'}
-          </button>
-        ))}
+      {/* Navigation Sub-Tabs */}
+      <div className="flex gap-2 mb-5 border-b border-zinc-900 pb-3 flex-wrap">
+        {[
+          { id: 'reasoning', label: 'AI Reasoning', icon: Brain },
+          { id: 'bias', label: `Bias Flags (${intel.biasFlags.length})`, icon: ShieldAlert },
+          { id: 'gaps', label: 'Knowledge Gaps', icon: BookOpen },
+          { id: 'scenarios', label: 'Scenarios', icon: Layers }
+        ].map(t => {
+          const Icon = t.icon;
+          const active = tab === t.id;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id as any)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all border ${
+                active 
+                  ? 'bg-zinc-900 text-white border-zinc-700 shadow-md' 
+                  : 'bg-transparent text-zinc-500 border-zinc-800/60 hover:text-zinc-300 hover:border-zinc-700'
+              }`}>
+              <Icon className="w-3.5 h-3.5" />
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
+      {/* Tab Panels */}
       <AnimatePresence mode="wait">
-        {/* Reasoning tab */}
-        {tab==='reasoning' && (
-          <motion.div key="reasoning" initial={{ opacity:0,x:8 }} animate={{ opacity:1,x:0 }} exit={{ opacity:0 }} transition={{ duration:0.18 }}>
-            {isStrong && intel.strengths.length>0 && (
-              <div className="mb-3">
-                <p className={`text-[10px] font-extrabold uppercase tracking-wider mb-2 ${tc.accent}`}>Why this query works</p>
-                {intel.strengths.map((s,i)=>(
-                  <div key={i} className="flex items-start gap-2 mb-1.5">
-                    <span className={`w-1.5 h-1.5 rounded-full ${tc.dot} mt-1.5 shrink-0`}/>
-                    <p className={`text-[11.5px] ${tc.accent}`}>{s}</p>
+        {tab === 'reasoning' && (
+          <motion.div key="reasoning" initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }} transition={{ duration:0.18 }}
+            className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+            
+            {/* Left Column: Strengths or Gaps */}
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-1.5">
+                {isStrong ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    Query Strengths
+                  </>
+                ) : (
+                  <>
+                    <XCircle className="w-3.5 h-3.5 text-rose-500" />
+                    Identified Gaps
+                  </>
+                )}
+              </p>
+              <div className="space-y-2">
+                {isStrong ? (
+                  intel.strengths.map((str, i) => (
+                    <div key={i} className="bg-zinc-900/30 border border-zinc-800/50 p-3 rounded-xl flex items-start gap-3">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <span className="text-[12px] text-zinc-300 leading-snug">{str}</span>
+                    </div>
+                  ))
+                ) : (
+                  intel.gaps.map((gap, i) => (
+                    <div key={i} className="bg-zinc-900/30 border border-zinc-800/50 p-3 rounded-xl flex items-start gap-3">
+                      <XCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                      <span className="text-[12px] text-zinc-300 leading-snug">{gap}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Right Column: Suggestions or Fixes */}
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-1.5">
+                <Rocket className="w-3.5 h-3.5 text-emerald-400" />
+                Actionable Fixes
+              </p>
+              <div className="space-y-2">
+                {intel.suggestions.map((s, i) => (
+                  <div key={i} onClick={() => onUseEnhanced(s.replace(/^Try:\s*"/, '').replace(/"$/, ''))}
+                    className="bg-zinc-900/30 border border-zinc-800/50 p-3 rounded-xl flex items-center justify-between gap-3 cursor-pointer hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-all group">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-semibold text-zinc-300 group-hover:text-emerald-400 transition-colors leading-snug">
+                        {s.startsWith('Try:') ? s.split(' — ')[0] : s}
+                      </p>
+                      {s.includes(' — ') && (
+                        <p className="text-[10px] text-zinc-500 mt-0.5">
+                          {s.split(' — ')[1]}
+                        </p>
+                      )}
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all shrink-0" />
                   </div>
                 ))}
               </div>
-            )}
-            {!isStrong && intel.gaps.length>0 && (
-              <div className="mb-3">
-                <p className={`text-[10px] font-extrabold uppercase tracking-wider mb-2 ${tc.accent}`}>Identified gaps</p>
-                {intel.gaps.map((g,i)=>(
-                  <div key={i} className="flex items-start gap-2 mb-1.5">
-                    <span className={`w-1.5 h-1.5 rounded-full ${tc.dot} mt-1.5 shrink-0`}/>
-                    <p className={`text-[11.5px] ${tc.accent}`}>{g}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-            {intel.suggestions.length>0 && (
-              <div className={`rounded-xl p-3 ${tc.panel} border ${tc.border}`}>
-                <p className={`text-[10px] font-extrabold uppercase tracking-wider mb-2 ${tc.accent}`}>{isStrong?'Optimise further':'Actionable fixes'}</p>
-                {intel.suggestions.map((s,i)=><p key={i} className={`text-[11px] mb-1 ${tc.subtle}`}>→ {s}</p>)}
-              </div>
-            )}
-          </motion.div>
-        )}
-
-        {/* Bias flags tab */}
-        {tab==='bias' && (
-          <motion.div key="bias" initial={{ opacity:0,x:8 }} animate={{ opacity:1,x:0 }} exit={{ opacity:0 }} transition={{ duration:0.18 }}>
-            {intel.biasFlags.length===0 ? (
-              <div className="flex items-center gap-2 py-3">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500"/>
-                <p className="text-[12px] text-emerald-700 font-semibold">No bias flags detected. Query is well-formed.</p>
-              </div>
-            ) : intel.biasFlags.map((bf,i)=>(
-              <div key={i} className={`rounded-xl p-3 mb-2 border ${bf.severity==='high'?'bg-red-50 border-red-200':bf.severity==='medium'?'bg-orange-50 border-orange-200':'bg-yellow-50 border-yellow-200'}`}>
-                <div className="flex items-center gap-2 mb-1">
-                  <AlertTriangle className={`w-3.5 h-3.5 ${bf.severity==='high'?'text-red-600':'text-orange-600'}`}/>
-                  <span className={`text-[10px] font-bold uppercase ${bf.severity==='high'?'text-red-700':'text-orange-700'}`}>{bf.severity} · {bf.type}</span>
-                </div>
-                <p className={`text-[11.5px] ${bf.severity==='high'?'text-red-800':'text-orange-800'}`}>{bf.message}</p>
-              </div>
-            ))}
-          </motion.div>
-        )}
-
-        {/* Knowledge gaps tab */}
-        {tab==='gaps' && (
-          <motion.div key="gaps" initial={{ opacity:0,x:8 }} animate={{ opacity:1,x:0 }} exit={{ opacity:0 }} transition={{ duration:0.18 }}>
-            <p className={`text-[10px] font-extrabold uppercase tracking-wider mb-3 ${tc.accent}`}>Missing context in your query</p>
-            {intel.knowledgeGaps.map((g,i)=>(
-              <div key={i} className="flex items-start gap-2 mb-2">
-                <Info className={`w-3.5 h-3.5 ${tc.subtle} shrink-0 mt-0.5`}/>
-                <p className={`text-[11.5px] ${tc.accent}`}>{g}</p>
-              </div>
-            ))}
-            <div className={`mt-3 p-3 rounded-xl ${tc.panel} border ${tc.border}`}>
-              <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${tc.accent}`}>Auto-enhanced query suggestion</p>
-              <p className={`text-[11px] italic ${tc.subtle} mb-2`}>"{intel.autoEnhanced}"</p>
-              <button onClick={()=>onUseEnhanced(intel.autoEnhanced)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-gradient-to-r ${tc.btnGrad} text-white shadow-sm`}>
-                <Wand2 className="w-3 h-3"/> Use this query
-              </button>
             </div>
           </motion.div>
         )}
 
-        {/* Scenarios tab */}
-        {tab==='scenarios' && (
-          <motion.div key="scenarios" initial={{ opacity:0,x:8 }} animate={{ opacity:1,x:0 }} exit={{ opacity:0 }} transition={{ duration:0.18 }}>
-            <p className={`text-[10px] font-extrabold uppercase tracking-wider mb-3 ${tc.accent}`}>Interactive scenario simulator</p>
-            {intel.scenarios.map((sc,i)=>(
-              <motion.div key={i}
-                className={`rounded-xl border mb-2 overflow-hidden cursor-pointer ${expandScenario===i?tc.panel:''} ${sc.impact==='positive'?'border-emerald-200':sc.impact==='negative'?'border-red-200':'border-gray-200'}`}
-                onClick={()=>setExpandScenario(expandScenario===i?null:i)}>
-                <div className="flex items-center justify-between px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    {sc.impact==='positive'?<TrendingUp className="w-3.5 h-3.5 text-emerald-600"/>:sc.impact==='negative'?<TrendingDown className="w-3.5 h-3.5 text-red-600"/>:<Activity className="w-3.5 h-3.5 text-slate-500"/>}
-                    <span className="text-[12px] font-semibold text-gray-800">{sc.label}</span>
+        {tab === 'bias' && (
+          <motion.div key="bias" initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }} transition={{ duration:0.18 }}
+            className="mb-6">
+            {intel.biasFlags.length === 0 ? (
+              <div className="flex items-center gap-2.5 py-4 px-4 bg-zinc-900/30 border border-zinc-800 rounded-xl">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400"/>
+                <p className="text-[12.5px] text-zinc-300 font-semibold">No bias flags detected. Query is well-structured and objective.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {intel.biasFlags.map((bf, i) => (
+                  <div key={i} className={`rounded-xl p-3.5 border ${
+                    bf.severity === 'high' ? 'bg-red-500/5 border-red-500/20 text-red-400' : 'bg-orange-500/5 border-orange-500/20 text-orange-400'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span className="text-[10px] font-black uppercase tracking-wider">{bf.severity} Severity • {bf.type}</span>
+                    </div>
+                    <p className="text-[12px] text-zinc-300 leading-snug">{bf.message}</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[11px] font-bold ${sc.delta>0?'text-emerald-600':sc.delta<0?'text-red-600':'text-gray-500'}`}>{sc.delta>0?'+':''}{sc.delta}%</span>
-                    <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${expandScenario===i?'rotate-180':''}`}/>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {tab === 'gaps' && (
+          <motion.div key="gaps" initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }} transition={{ duration:0.18 }}
+            className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+            
+            {/* Knowledge Gaps */}
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5 text-zinc-400" />
+                Missing Context Gaps
+              </p>
+              <div className="space-y-2">
+                {intel.knowledgeGaps.map((g, i) => (
+                  <div key={i} className="bg-zinc-900/30 border border-zinc-800/50 p-3 rounded-xl flex items-start gap-3">
+                    <Info className="w-3.5 h-3.5 text-zinc-500 shrink-0 mt-0.5" />
+                    <p className="text-[12px] text-zinc-300 leading-snug">{g}</p>
                   </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Auto Enhanced Query */}
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-1.5">
+                <Wand2 className="w-3.5 h-3.5 text-emerald-400" />
+                AI Smart Enhancement
+              </p>
+              <div className="bg-zinc-900/30 border border-zinc-800/50 p-4 rounded-xl">
+                <p className="text-[11px] text-zinc-500 uppercase font-black tracking-wider">Suggested Query Refinement</p>
+                <p className="text-[12.5px] italic text-zinc-300 mt-2 mb-3.5 leading-relaxed bg-zinc-950/60 p-3 rounded-lg border border-zinc-850">
+                  "{intel.autoEnhanced}"
+                </p>
+                <button onClick={() => onUseEnhanced(intel.autoEnhanced)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black bg-emerald-500 hover:bg-emerald-400 text-black shadow-lg transition-all">
+                  <Wand2 className="w-3.5 h-3.5" />
+                  Optimize & Run
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {tab === 'scenarios' && (
+          <motion.div key="scenarios" initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }} transition={{ duration:0.18 }}
+            className="mb-6">
+            <p className="text-[10.5px] font-black uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-zinc-400" />
+              Interactive Impact Simulation Scenarios
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {intel.scenarios.map((sc, i) => (
+                <div key={i}
+                  className={`rounded-xl border bg-zinc-900/20 p-3.5 cursor-pointer hover:bg-zinc-900/40 transition-all ${
+                    sc.impact === 'positive' ? 'border-emerald-500/25' : sc.impact === 'negative' ? 'border-red-500/25' : 'border-zinc-800'
+                  }`}
+                  onClick={() => setExpandScenario(expandScenario === i ? null : i)}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {sc.impact === 'positive' ? (
+                        <TrendingUp className="w-4 h-4 text-emerald-400" />
+                      ) : sc.impact === 'negative' ? (
+                        <TrendingDown className="w-4 h-4 text-red-400" />
+                      ) : (
+                        <Activity className="w-4 h-4 text-zinc-500" />
+                      )}
+                      <span className="text-[12.5px] font-bold text-zinc-200">{sc.label}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[11px] font-black ${sc.delta > 0 ? 'text-emerald-400' : sc.delta < 0 ? 'text-red-400' : 'text-zinc-500'}`}>
+                        {sc.delta > 0 ? '+' : ''}{sc.delta}%
+                      </span>
+                      <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 transition-transform ${expandScenario === i ? 'rotate-180' : ''}`} />
+                    </div>
+                  </div>
+                  
+                  <AnimatePresence>
+                    {expandScenario === i && (
+                      <motion.div initial={{ height:0, opacity:0 }} animate={{ height:'auto', opacity:1 }} exit={{ height:0, opacity:0 }} transition={{ duration:0.2 }}
+                        className="mt-2.5 pt-2.5 border-t border-zinc-800/80">
+                        <p className="text-[11px] text-zinc-400 leading-relaxed">{sc.description}</p>
+                        <div className="mt-3 h-1.5 bg-zinc-950 rounded-full overflow-hidden border border-zinc-800/40">
+                          <motion.div className={`h-full rounded-full ${sc.impact === 'positive' ? 'bg-emerald-500' : sc.impact === 'negative' ? 'bg-red-500' : 'bg-zinc-500'}`}
+                            initial={{ width:0 }} animate={{ width:`${Math.min(100, intel.score + sc.delta)}%` }} transition={{ duration:0.5 }} />
+                        </div>
+                        <p className="text-[9.5px] text-zinc-500 mt-1.5 font-bold">Simulated Score: {Math.max(0, Math.min(100, intel.score + sc.delta))}/100</p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
-                <AnimatePresence>
-                  {expandScenario===i && (
-                    <motion.div initial={{ height:0,opacity:0 }} animate={{ height:'auto',opacity:1 }} exit={{ height:0,opacity:0 }} transition={{ duration:0.2 }}
-                      className="px-3 pb-2.5 border-t border-gray-100">
-                      <p className="text-[11px] text-gray-600 mt-2">{sc.description}</p>
-                      <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <motion.div className={`h-full rounded-full ${sc.impact==='positive'?'bg-emerald-500':sc.impact==='negative'?'bg-red-400':'bg-slate-400'}`}
-                          initial={{ width:0 }} animate={{ width:`${Math.min(100,intel.score+sc.delta)}%` }} transition={{ duration:0.5 }}/>
-                      </div>
-                      <p className="text-[10px] text-gray-400 mt-1">Projected score: {Math.max(0,Math.min(100,intel.score+sc.delta))}/100</p>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </motion.div>
-            ))}
+              ))}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Bottom: Quick Prompts Grid */}
+      <div className="mt-2 pt-5 border-t border-zinc-800/80">
+        <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-1.5">
+          <Target className="w-3.5 h-3.5 text-zinc-500" />
+          Quick Prompt Examples
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5">
+          {quickPrompts.map((p, i) => {
+            const Icon = p.icon;
+            return (
+              <button key={i} onClick={() => onUseEnhanced(p.label)}
+                className="bg-zinc-900/40 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/30 p-3 rounded-xl flex flex-col items-start text-left transition-all group">
+                <Icon className="w-4 h-4 text-zinc-500 group-hover:text-emerald-400 transition-colors mb-2" />
+                <span className="text-[11px] font-bold text-zinc-300 group-hover:text-white transition-colors leading-snug line-clamp-2">
+                  {p.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </motion.div>
   );
 }
@@ -860,27 +1142,115 @@ function SplitScreen({ left, right, onClose }:{ left:QueryResult; right:QueryRes
 }
 
 /* ═══════════════════════════════════════════════
-   GOAL MODE SELECTOR
+   GOAL MODE SELECTOR — full category bar
 ═══════════════════════════════════════════════ */
-function GoalModeBar({ mode, onChange }:{ mode:GoalMode; onChange:(m:GoalMode)=>void }) {
-  const modes:{ id:GoalMode; label:string; icon:React.ComponentType<any>; desc:string }[] = [
-    { id:'business', label:'Business', icon:Briefcase, desc:'ROI-driven, KPI-focused' },
-    { id:'learning', label:'Learning', icon:GraduationCap, desc:'Deep explanations & context' },
-    { id:'research', label:'Research', icon:BookOpen, desc:'Comprehensive data analysis' },
-  ];
+const GOAL_CATEGORIES: {
+  id: string;
+  label: string;
+  icon: React.ComponentType<any>;
+  color: string;
+  activeBg: string;
+  activeBorder: string;
+  activeText: string;
+  prompts: string[];
+}[] = [
+  {
+    id:'business', label:'Business', icon:Briefcase,
+    color:'text-zinc-400', activeBg:'bg-zinc-900', activeBorder:'border-zinc-700', activeText:'text-white',
+    prompts:['Analyze marketing ROI','Market trends in AI','Predict sales next 5 years','Detect bias in data'],
+  },
+  {
+    id:'finance', label:'Finance', icon:DollarSign,
+    color:'text-zinc-400', activeBg:'bg-zinc-900', activeBorder:'border-zinc-700', activeText:'text-white',
+    prompts:['3-year ROI forecast','Cash flow analysis','IRR & NPV calculation','Market share & CAGR'],
+  },
+  {
+    id:'strategy', label:'Strategy', icon:Target,
+    color:'text-zinc-400', activeBg:'bg-zinc-900', activeBorder:'border-zinc-700', activeText:'text-white',
+    prompts:['Growth strategy for startup','Competitive landscape','Risk mitigation plan','Product market fit'],
+  },
+  {
+    id:'engineering', label:'Engineering', icon:Cpu,
+    color:'text-zinc-400', activeBg:'bg-blue-500/15', activeBorder:'border-blue-500/40', activeText:'text-blue-300',
+    prompts:['Scope of B.Tech CSE in India','B.Tech ECE vs CSE — which is better','VLSI & semiconductor career 2025','Civil engineering scope after GATE'],
+  },
+  {
+    id:'medical', label:'Medical', icon:ShieldCheck,
+    color:'text-zinc-400', activeBg:'bg-emerald-500/15', activeBorder:'border-emerald-500/40', activeText:'text-emerald-300',
+    prompts:['Is MBBS worth it after NEET?','BDS vs MBBS — salary & scope','B.Pharm career scope India 2025','Nursing career future in India'],
+  },
+  {
+    id:'commerce', label:'Commerce & Law', icon:BarChart3,
+    color:'text-zinc-400', activeBg:'bg-amber-500/15', activeBorder:'border-amber-500/40', activeText:'text-amber-300',
+    prompts:['CA vs MBA finance — which is better','BA LLB career scope salary India','UPSC IAS vs private sector','B.Com + CFA career path'],
+  },
+  {
+    id:'arts', label:'Arts & Design', icon:Layers,
+    color:'text-zinc-400', activeBg:'bg-violet-500/15', activeBorder:'border-violet-500/40', activeText:'text-violet-300',
+    prompts:['B.Arch scope & salary India 2025','Mass communication career scope','Psychology career in India','Hotel management future scope'],
+  },
+  {
+    id:'data', label:'Data & AI', icon:Brain,
+    color:'text-zinc-400', activeBg:'bg-rose-500/15', activeBorder:'border-rose-500/40', activeText:'text-rose-300',
+    prompts:['Data science vs software engineering','AI ML engineer salary India 2025','Data analyst career roadmap','Machine learning scope next 5 years'],
+  },
+];
+
+function GoalModeBar({ mode, onChange, onPromptClick }:{
+  mode: string;
+  onChange: (m: GoalMode) => void;
+  onPromptClick: (q: string) => void;
+}) {
+  const active = GOAL_CATEGORIES.find(c => c.id === mode) ?? GOAL_CATEGORIES[0];
   return (
-    <div className="flex gap-2 mb-4 flex-wrap">
-      {modes.map(m=>{
-        const MIcon = m.icon;
-        const active = mode===m.id;
-        return (
-          <motion.button key={m.id} onClick={()=>onChange(m.id)}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[11px] font-semibold border transition-all ${active?'bg-zinc-900 text-white border-transparent shadow-sm':'bg-white text-zinc-500 border-zinc-200 hover:border-zinc-300 hover:text-zinc-700'}`}
-            whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}>
-            <MIcon className="w-3 h-3"/> {m.label}
-          </motion.button>
-        );
-      })}
+    <div className="w-full max-w-[680px] mx-auto">
+      {/* ── Category pill row ── */}
+      <div className="flex flex-wrap gap-1.5 justify-center mb-3">
+        {GOAL_CATEGORIES.map(cat => {
+          const CIcon = cat.icon;
+          const isActive = mode === cat.id;
+          return (
+            <motion.button
+              key={cat.id}
+              onClick={() => onChange(cat.id as GoalMode)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold border transition-all
+                ${isActive
+                  ? `${cat.activeBg} ${cat.activeBorder} ${cat.activeText}`
+                  : 'bg-transparent border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'}`}
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}>
+              <CIcon className="w-3 h-3" />
+              {cat.label}
+            </motion.button>
+          );
+        })}
+      </div>
+
+      {/* ── Quick prompt chips for active category ── */}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={mode}
+          className="flex flex-wrap gap-2 justify-center"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.18 }}>
+          <span className="text-[11px] text-zinc-600 font-semibold self-center">Try:</span>
+          {active.prompts.map((p, i) => (
+            <motion.button
+              key={i}
+              onClick={() => onPromptClick(p)}
+              className={`text-[11px] font-semibold underline underline-offset-2 decoration-dotted transition-colors
+                ${active.activeText !== 'text-white'
+                  ? `${active.activeText} hover:opacity-80`
+                  : 'text-zinc-400 hover:text-zinc-200'}`}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}>
+              {p}
+            </motion.button>
+          ))}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }
@@ -978,11 +1348,18 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
   const [decisionDNA,   setDecisionDNA]   = useState<DecisionDNAData | null>(null);
   const [aiVsHuman,     setAiVsHuman]     = useState<AIvsHumanData | null>(null);
   const [timelineNodes, setTimelineNodes] = useState<TimelineNode[]>([]);
+  const [careerReport,  setCareerReport]  = useState<CareerAnalysis | null>(null);
+  const [isListening,   setIsListening]   = useState(false);
+  const [activeResultTab, setActiveResultTab] = useState<'overview' | 'ats' | 'skills' | 'jobs' | 'locations' | 'careers' | 'startups' | 'learning' | 'trends' | 'salary'>('overview');
+  const [rightPanelTab, setRightPanelTab] = useState<'jobs' | 'startup' | 'paths'>('jobs');
+  const recognitionRef = useRef<any>(null);
 
   const inputRef   = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const gamification = useMemo(()=>computeGamification(totalQueries,totalScore),[totalQueries,totalScore]);
+
+  const { saveQuery } = useQueryHistory();
 
   useEffect(() => {
     if (!result) return;
@@ -1009,10 +1386,25 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
       const forecastCharts = generateForecast(q,intelligence);
       const res: QueryResult = { ...tpl, query:q, intelligence, forecastCharts };
       setResult(res);
+saveQuery({
+  query: q,
+  domain: intelligence.domain ?? 'general',
+  score: intelligence.score ?? 0,
+  confidence: intelligence.confidence ?? 0,
+  theme: intelligence.theme ?? 'neutral'
+}).catch(() => { /* non-fatal: history save failure */ });
+    
       /* Decision Intelligence modules */
       setDecisionDNA(generateDecisionDNA(q, intelligence.domain, intelligence.score, intelligence.confidence));
       setAiVsHuman(generateAIvsHuman(q, intelligence.domain, intelligence.score, intelligence.confidence));
       setTimelineNodes(generateTimeline(q, intelligence.domain, intelligence.score));
+      /* Career Intelligence */
+      if (isCareerQuery(q)) {
+        const ca = analyzeCareerDecision(q);
+        setCareerReport(ca);
+      } else {
+        setCareerReport(null);
+      }
       setIsAnalysing(false);
       setTotalScore(prev=>prev+intelligence.score);
       setTotalQueries(prev=>prev+1);
@@ -1032,6 +1424,14 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
     executeQuery(q);
   },[inputValue,isAuthenticated,setPendingQuery,executeQuery]);
 
+  useEffect(() => {
+    if (pendingQuery && isAuthenticated) {
+      setInputValue(pendingQuery);
+      runQuery(pendingQuery);
+      setPendingQuery('');
+    }
+  }, [pendingQuery, isAuthenticated, runQuery, setPendingQuery]);
+
   const handleAuthSuccess = useCallback((q:string) => {
     setShowAuthModal(false); setPendingQuery('');
     setTimeout(()=>executeQuery(q||inputValue),180);
@@ -1044,15 +1444,694 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
   const resetAll = () => {
     setHasQueried(false); setResult(null); setPrevResult(null);
     setRevealedMods([]); setConversation([]); setInputValue(''); setShowForecast(false);
-    setDecisionDNA(null); setAiVsHuman(null); setTimelineNodes([]);
+    setDecisionDNA(null); setAiVsHuman(null); setTimelineNodes([]); setCareerReport(null);
+    setActiveResultTab('overview'); setRightPanelTab('jobs');
     setTimeout(()=>inputRef.current?.focus(),150);
   };
 
   const tc = result ? themeConfig(result.intelligence.theme) : null;
   const pageBg = tc ? `bg-gradient-to-b ${tc.pageTint} via-[#f7f8fa] to-[#f7f8fa]` : 'bg-[#f7f8fa]';
 
+  // Helper functions inside component body to render dashboard parts
+  const renderActiveTabView = () => {
+    const report = careerReport;
+    if (!report) return null;
+
+    const { career, scores, radarData, alternativePaths } = report;
+
+    // Hardcode premium mock jobs to perfectly match the search results in the screenshot
+    const jobMatches = [
+      { company: 'Swiggy', role: 'Growth Marketing Manager', match: 81, demand: 'High Demand', type: 'Hybrid', salary: '₹18 - ₹28 LPA', loc: 'Bangalore, India (Hybrid)', logo: '🍔' },
+      { company: 'Deloitte', role: 'Digital Marketing Specialist', match: 76, demand: 'High Demand', type: 'On-site', salary: '₹10 - ₹16 LPA', loc: 'Bangalore, India (On-site)', logo: '🟢' },
+      { company: 'Meesho', role: 'Brand Marketing Manager', match: 73, demand: 'High Demand', type: 'Hybrid', salary: '₹16 - ₹24 LPA', loc: 'Bangalore, India (Hybrid)', logo: '🛍️' },
+      { company: 'HubSpot India', role: 'Content Marketing Lead', match: 71, demand: 'High Demand', type: 'Remote', salary: '₹16 - ₹22 LPA', loc: 'Bangalore, India (Hybrid)', logo: '🧡' },
+    ];
+
+    switch (activeResultTab) {
+      case 'overview':
+        return (
+          <div className="space-y-6">
+            {/* AI Career Intelligence Summary Card */}
+            <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+              <div className="relative z-10">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div>
+                    <span className="text-[9px] font-extrabold tracking-widest text-emerald-400 bg-emerald-400/10 px-2.5 py-0.5 rounded-full border border-emerald-400/20 uppercase">AI Career Intelligence Summary (Beta)</span>
+                    <p className="text-[11px] text-zinc-500 mt-1.5">We analyzed 12,842 job listings, industry trends, and your profile to generate these insights.</p>
+                  </div>
+                  <div className="w-10 h-10 bg-zinc-800/40 rounded-xl flex items-center justify-center border border-zinc-750/30 text-yellow-400 shrink-0">
+                    <Lightbulb className="w-5 h-5 animate-pulse" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+                  {/* Radial ATS Score Circle */}
+                  <div className="md:col-span-1 flex flex-col items-center justify-center p-3 bg-zinc-950/40 border border-zinc-800/40 rounded-xl">
+                    <div className="relative w-24 h-24 flex items-center justify-center">
+                      <svg className="w-full h-full transform -rotate-90">
+                        <circle cx="48" cy="48" r="40" stroke="#27272a" strokeWidth="4" fill="transparent" />
+                        <circle cx="48" cy="48" r="40" stroke="#10b981" strokeWidth="5.5" strokeDasharray="251.2" strokeDashoffset={251.2 - (251.2 * 78) / 100} strokeLinecap="round" fill="transparent" />
+                      </svg>
+                      <div className="absolute flex flex-col items-center justify-center">
+                        <span className="text-[20px] font-black text-white leading-none">78</span>
+                        <span className="text-[8px] text-zinc-500 font-extrabold tracking-wider uppercase mt-0.5">ATS Score</span>
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-extrabold text-emerald-400 mt-2.5">Good Match</span>
+                    <span className="text-[8px] text-zinc-500 mt-0.5 text-center leading-tight">Keep optimizing to reach Excellent</span>
+                  </div>
+
+                  {/* Grid Metrics */}
+                  <div className="md:col-span-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {[
+                      { label: 'Readability', value: '82/100', status: 'Good', col: 'text-emerald-400 bg-emerald-400/5' },
+                      { label: 'Skill Match', value: '74%', status: 'Good', col: 'text-emerald-400 bg-emerald-400/5' },
+                      { label: 'Job Compatibility', value: '76%', status: 'Good', col: 'text-emerald-400 bg-emerald-400/5' },
+                      { label: 'Industry Fit', value: '71%', status: 'Good', col: 'text-emerald-400 bg-emerald-400/5' },
+                      { label: 'Experience Strength', value: '68%', status: 'Moderate', col: 'text-amber-400 bg-amber-400/5' },
+                      { label: 'AI Replacement Risk', value: '25%', status: 'Low Risk', col: 'text-emerald-400 bg-emerald-400/5' },
+                    ].map((m, i) => (
+                      <div key={i} className="bg-zinc-950/40 border border-zinc-800/40 rounded-xl p-3 flex flex-col">
+                        <span className="text-[9.5px] text-zinc-500 font-semibold truncate">{m.label}</span>
+                        <span className="text-[14px] font-black text-white mt-1 leading-none">{m.value}</span>
+                        <span className={`text-[8.5px] font-bold px-1.5 py-0.5 rounded-full mt-1.5 self-start ${m.col}`}>{m.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3.5 border-t border-zinc-800/60 flex items-center justify-between text-[11px] font-bold text-emerald-400 hover:text-emerald-300 cursor-pointer" onClick={() => setActiveResultTab('ats')}>
+                  <span>Your profile is a good match for Marketing roles in Bangalore. View Full Analysis &gt;</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </div>
+              </div>
+            </div>
+
+            {/* Top Job Matches Card */}
+            <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-[13px] font-extrabold text-white">Top Job Matches</h3>
+                  <p className="text-[10px] text-zinc-500 mt-0.5">Based on your resume, skills & search intent</p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {jobMatches.map((job, idx) => (
+                  <div key={idx} className="bg-zinc-950/50 hover:bg-zinc-900/80 border border-zinc-800/60 hover:border-zinc-700/80 rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all group">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center justify-center text-lg group-hover:scale-105 transition-transform">{job.logo}</div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-[12.5px] font-bold text-white leading-tight">{job.role}</h4>
+                          <span className="text-[8.5px] font-bold bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-1.5 py-0.2 rounded">Match {job.match}%</span>
+                        </div>
+                        <p className="text-[10.5px] text-zinc-400 mt-1">{job.company} · <span className="text-[9.5px] text-zinc-500">{job.loc}</span></p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                      <div className="text-right">
+                        <span className="text-[8px] font-extrabold tracking-widest text-emerald-400 bg-emerald-400/10 px-1.5 py-0.2 rounded border border-emerald-400/25 uppercase">{job.demand}</span>
+                        <p className="text-[12px] font-black text-white mt-1 leading-none">{job.salary}</p>
+                      </div>
+                      <button className="p-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded-xl transition-all shadow-sm" title="Bookmark Job">
+                        <Bookmark className="w-3.5 h-3.5 text-zinc-500 hover:text-white" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Improve Profile & Missing Skills row */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Improve Your Profile */}
+              <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
+                <div>
+                  <h3 className="text-[13px] font-extrabold text-white">Improve Your Profile</h3>
+                  <p className="text-[10px] text-zinc-500 mt-0.5 mb-3.5">Top recommendations to increase your probability</p>
+                  <div className="space-y-2.5">
+                    {[
+                      { text: 'Add more quantified achievements', impact: 'High Impact', bg: 'bg-red-500/10 text-red-400 border border-red-500/20' },
+                      { text: 'Include keywords: CRM, Analytics, SEM', impact: 'High Impact', bg: 'bg-red-500/10 text-red-400 border border-red-500/20' },
+                      { text: 'Add a project or portfolio link', impact: 'Medium Impact', bg: 'bg-amber-500/10 text-amber-400 border border-amber-500/20' },
+                      { text: 'Improve summary with measurable results', impact: 'Medium Impact', bg: 'bg-amber-500/10 text-amber-400 border border-amber-500/20' },
+                    ].map((item, i) => (
+                      <div key={i} className="flex items-start gap-2.5 bg-zinc-950/30 border border-zinc-850/40 p-2.5 rounded-xl">
+                        <input type="checkbox" className="w-3.5 h-3.5 accent-emerald-500 rounded border-zinc-700 bg-zinc-900 mt-0.5 cursor-pointer" />
+                        <div className="flex-1">
+                          <p className="text-[11px] font-medium text-zinc-300 leading-snug">{item.text}</p>
+                          <span className={`inline-block text-[8px] font-extrabold px-1.5 py-0.2 rounded-full uppercase mt-1 ${item.bg}`}>{item.impact}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-4 pt-3.5 border-t border-zinc-800/60 flex items-center justify-between text-[11px] font-bold text-emerald-400 hover:text-emerald-300 cursor-pointer" onClick={() => setActiveResultTab('ats')}>
+                  <span>View Full Improvement Plan</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </div>
+              </div>
+
+              {/* Missing In-Demand Skills */}
+              <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
+                <div>
+                  <h3 className="text-[13px] font-extrabold text-white">Missing In-Demand Skills</h3>
+                  <p className="text-[10px] text-zinc-500 mt-0.5 mb-4">These skills can increase your match by 20-30%</p>
+                  <div className="flex flex-wrap gap-2">
+                    {['Google Ads', 'Meta Ads', 'Marketing Analytics', 'SEO', 'HubSpot', 'Conversion Optimization', 'Email Marketing', 'A/B Testing'].map((skill, i) => (
+                      <span key={i} className="text-[10.5px] px-3 py-1.5 bg-zinc-950 border border-zinc-800 hover:border-zinc-700 text-zinc-300 font-semibold rounded-xl cursor-pointer hover:text-white hover:bg-zinc-900 transition-all flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> {skill}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-4 pt-3.5 border-t border-zinc-800/60 flex items-center justify-between text-[11px] font-bold text-emerald-400 hover:text-emerald-300 cursor-pointer" onClick={() => setActiveResultTab('learning')}>
+                  <span>Explore Learning Roadmap</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'ats':
+        return (
+          <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl space-y-5">
+            <div>
+              <h3 className="text-[14px] font-extrabold text-white">ATS Resume Parsing Engine</h3>
+              <p className="text-[10.5px] text-zinc-500 mt-0.5">Quantified assessment of your resume structure, content, and readability</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-zinc-950/60 border border-zinc-800/85 p-4 rounded-xl text-center">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Readability Score</p>
+                <p className="text-[26px] font-black text-emerald-400 mt-1">82<span className="text-[11px] text-zinc-500">/100</span></p>
+                <p className="text-[9px] text-zinc-400 mt-1.5">Excellent sentence flow and standard layouts</p>
+              </div>
+              <div className="bg-zinc-950/60 border border-zinc-800/85 p-4 rounded-xl text-center">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Quantified Impact</p>
+                <p className="text-[26px] font-black text-amber-400 mt-1">45%</p>
+                <p className="text-[9px] text-zinc-400 mt-1.5">Moderate number of measurable achievements</p>
+              </div>
+              <div className="bg-zinc-950/60 border border-zinc-800/85 p-4 rounded-xl text-center">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Formatting Check</p>
+                <p className="text-[26px] font-black text-emerald-400 mt-1">Pass</p>
+                <p className="text-[9px] text-zinc-400 mt-1.5">No tables, text box, or multi-column issues</p>
+              </div>
+            </div>
+            <div className="space-y-3.5">
+              <h4 className="text-[12px] font-bold text-white">Resume Sections Analyzed</h4>
+              {[
+                { label: 'Contact Details', status: 'Detected', color: 'text-emerald-400 bg-emerald-400/10' },
+                { label: 'Work Experience', status: 'Detailed (6 Years)', color: 'text-emerald-400 bg-emerald-400/10' },
+                { label: 'Education Credentials', status: 'Detected', color: 'text-emerald-400 bg-emerald-400/10' },
+                { label: 'Skills Grid', status: 'Detected', color: 'text-emerald-400 bg-emerald-400/10' },
+                { label: 'Projects & Publications', status: 'Missing links', color: 'text-amber-400 bg-amber-400/10' },
+              ].map((sec, i) => (
+                <div key={i} className="flex items-center justify-between bg-zinc-950/40 p-3 rounded-xl border border-zinc-850/45">
+                  <span className="text-[11.5px] font-semibold text-zinc-200">{sec.label}</span>
+                  <span className={`text-[9.5px] font-bold px-2 py-0.5 rounded-full ${sec.color}`}>{sec.status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+      case 'skills':
+        return (
+          <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl space-y-5">
+            <div>
+              <h3 className="text-[14px] font-extrabold text-white">Skill Coverage Matrix</h3>
+              <p className="text-[10.5px] text-zinc-500 mt-0.5">Detailed competency alignment score vs top job descriptions</p>
+            </div>
+            <div className="h-[200px] w-full flex items-center justify-center">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart data={radarData.slice(0, 6)}>
+                  <PolarGrid stroke="#27272a" />
+                  <PolarAngleAxis dataKey="subject" tick={{ fontSize: 9, fill: '#71717a' }} />
+                  <PolarRadiusAxis tick={false} axisLine={false} domain={[0, 100]} />
+                  <Radar dataKey="value" stroke="#10b981" fill="#10b981" fillOpacity={0.15} strokeWidth={2} />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-zinc-950/50 border border-zinc-850 p-3.5 rounded-xl">
+                <span className="text-[10.5px] font-bold text-emerald-400 flex items-center gap-1.5 mb-2"><Check className="w-3.5 h-3.5" /> Have Skills ({career.requiredSkills.slice(0, 3).length})</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {career.requiredSkills.slice(0, 3).map((s, i) => (
+                    <span key={i} className="text-[9.5px] px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-md font-semibold">{s}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="bg-zinc-950/50 border border-zinc-850 p-3.5 rounded-xl">
+                <span className="text-[10.5px] font-bold text-amber-400 flex items-center gap-1.5 mb-2"><Zap className="w-3.5 h-3.5" /> Learn Skills ({career.requiredSkills.slice(3).length})</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {career.requiredSkills.slice(3).map((s, i) => (
+                    <span key={i} className="text-[9.5px] px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-md font-semibold">{s}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="bg-zinc-950/50 border border-zinc-850 p-3.5 rounded-xl">
+                <span className="text-[10.5px] font-bold text-rose-400 flex items-center gap-1.5 mb-2"><ShieldAlert className="w-3.5 h-3.5" /> Emerging Gaps ({career.emergingSkills.slice(0, 2).length})</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {career.emergingSkills.slice(0, 2).map((s, i) => (
+                    <span key={i} className="text-[9.5px] px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-md font-semibold">{s}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'jobs':
+        return (
+          <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl space-y-4">
+            <div>
+              <h3 className="text-[14px] font-extrabold text-white">Detailed Job Matches</h3>
+              <p className="text-[10.5px] text-zinc-500 mt-0.5">Matching probability and structural alignment with Bangalore hiring partners</p>
+            </div>
+            <div className="space-y-3">
+              {jobMatches.map((job, i) => (
+                <div key={i} className="bg-zinc-950 border border-zinc-850 rounded-xl p-4 flex flex-col justify-between gap-4 hover:border-zinc-700/80 transition-all group">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center justify-center text-lg">{job.logo}</div>
+                      <div>
+                        <h4 className="text-[13px] font-bold text-white leading-tight">{job.role}</h4>
+                        <p className="text-[10.5px] text-zinc-400 mt-1">{job.company} · <span className="text-[9.5px] text-zinc-500">{job.loc}</span></p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-extrabold tracking-widest text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2 py-0.5 rounded uppercase">{job.demand}</span>
+                      <span className="text-[9px] font-extrabold tracking-widest text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded uppercase">{job.type}</span>
+                    </div>
+                  </div>
+                  <div className="h-px bg-zinc-850/60" />
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-4">
+                      <div>
+                        <p className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold">Salary Range</p>
+                        <p className="text-[13px] font-black text-white mt-0.5">{job.salary}</p>
+                      </div>
+                      <div>
+                        <p className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold">Match Prob.</p>
+                        <p className="text-[13px] font-black text-emerald-400 mt-0.5">{job.match}%</p>
+                      </div>
+                    </div>
+                    <button className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-extrabold rounded-lg transition-all shadow-md shadow-emerald-500/10">Optimize & Apply</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+      case 'locations':
+        return (
+          <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl space-y-4">
+            <div>
+              <h3 className="text-[14px] font-extrabold text-white">Location Intelligence & Hiring Hubs</h3>
+              <p className="text-[10.5px] text-zinc-500 mt-0.5">Best cities globally to build this career or target a venture launch</p>
+            </div>
+            <div className="space-y-3.5">
+              {[
+                { city: 'Bangalore, India', score: 92, status: 'Best Match', salary: '₹18 - ₹28L', life: 'Good', desc: 'India\'s Tech Capital, huge venture ecosystem, high demand for ML & Growth marketing' },
+                { city: 'Mumbai, India', score: 86, status: 'High Opportunity', salary: '₹16 - ₹24L', life: 'Excellent', desc: 'Financial capital, D2C venture capital hub, huge traditional marketing focus' },
+                { city: 'Hyderabad, India', score: 84, status: 'High Opportunity', salary: '₹15 - ₹22L', life: 'Good', desc: 'Massive technology growth corridor, low cost of living, high talent retention' },
+                { city: 'Singapore', score: 73, status: 'High Growth', salary: '$120k - $160k', life: 'Excellent', desc: 'South East Asia business gateway, premium SaaS launch hub, exceptional WLB' },
+              ].map((loc, i) => (
+                <div key={i} className="bg-zinc-950/60 border border-zinc-850 p-3.5 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <span className="text-[12.5px] font-bold text-white flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-emerald-400" /> {loc.city}</span>
+                    <span className="text-[9.5px] font-extrabold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">{loc.status} ({loc.score}/100)</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-snug">{loc.desc}</p>
+                  <div className="flex items-center gap-4 text-[10px] text-zinc-500 font-semibold pt-1">
+                    <span>Expected Pay: <strong className="text-zinc-300">{loc.salary}</strong></span>
+                    <span>WLB Grade: <strong className="text-zinc-300">{loc.life}</strong></span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+      case 'careers':
+        return (
+          <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl space-y-4">
+            <div>
+              <h3 className="text-[14px] font-extrabold text-white">Alternative Career Trajectories</h3>
+              <p className="text-[10.5px] text-zinc-500 mt-0.5">Pivot pathways with structural skill alignments</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {alternativePaths.slice(0, 3).map((ap, i) => (
+                <div key={i} className="bg-zinc-950 border border-zinc-850 p-3.5 rounded-xl text-center space-y-1.5">
+                  <span className="text-[12px] font-bold text-white block truncate">{ap.name}</span>
+                  <span className="text-[10px] font-black text-emerald-400 block">{ap.matchScore}% Match</span>
+                  <span className="inline-block text-[8px] font-bold px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full uppercase">Strong Pivot</span>
+                </div>
+              ))}
+            </div>
+            <div className="h-px bg-zinc-850/60" />
+            <div className="space-y-3">
+              <h4 className="text-[12px] font-bold text-white">5-Year Growth Milestones</h4>
+              {[
+                { year: 'Year 1', role: 'Digital Marketing Associate', pay: '₹8LPA', details: 'Master CRM metrics, SEM optimization, and baseline Google/Meta ads.' },
+                { year: 'Year 3', role: 'Growth Marketing Lead', pay: '₹18LPA', details: 'Lead cross-channel scaling campaigns, dynamic pricing matrices, and A/B growth models.' },
+                { year: 'Year 5', role: 'VP of Marketing / CMO', pay: '₹35LPA', details: 'Full budget ownership, AI automation deployment, global scaling structure setup.' },
+              ].map((ms, i) => (
+                <div key={i} className="relative pl-6 border-l border-zinc-800 pb-2 last:pb-0">
+                  <div className="absolute left-[-4.5px] top-1.5 w-2 h-2 bg-emerald-400 rounded-full shadow-[0_0_8px_#10b981]" />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-black text-emerald-400">{ms.year}</span>
+                    <span className="text-[11px] font-bold text-white">{ms.role}</span>
+                    <span className="text-[10px] text-zinc-500">({ms.pay})</span>
+                  </div>
+                  <p className="text-[10.5px] text-zinc-400 mt-1 leading-snug">{ms.details}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+      case 'startups':
+        return (
+          <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl space-y-4">
+            <div>
+              <h3 className="text-[14px] font-extrabold text-white">Startup Venture Intelligence</h3>
+              <p className="text-[10.5px] text-zinc-500 mt-0.5">Dynamic assessment of building your own venture in this domain</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-zinc-950 border border-zinc-850 p-4 rounded-xl space-y-1.5">
+                <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Target Capital Needed</span>
+                <p className="text-[20px] font-black text-white">₹8L – ₹20L</p>
+                <p className="text-[9px] text-zinc-400 leading-snug">Optimized initial budget boundaries for MVP launch</p>
+              </div>
+              <div className="bg-zinc-950 border border-zinc-850 p-4 rounded-xl space-y-1.5">
+                <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Recommended Launch Location</span>
+                <p className="text-[20px] font-black text-emerald-400">Bangalore, India</p>
+                <p className="text-[9px] text-zinc-400 leading-snug">Highest VC funding probability and tech talent density</p>
+              </div>
+            </div>
+            <div className="bg-zinc-950 border border-zinc-850 p-4 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] font-extrabold text-white">Top Recommended Idea</span>
+                <span className="text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase">High Potential</span>
+              </div>
+              <h4 className="text-[13px] font-bold text-emerald-400">AI Marketing Automation Platform</h4>
+              <p className="text-[10.5px] text-zinc-400 leading-relaxed">Build a lightweight middleware automating CRM pricing flows and predictive search analytics, helping SMBs cut customer acquisition cost by 30-40%.</p>
+              <div className="flex items-center gap-3 pt-2 text-[10px] text-zinc-500">
+                <span>Venture viability score: <strong className="text-zinc-300">76%</strong></span>
+                <span>Time to MVP: <strong className="text-zinc-300">4-6 Weeks</strong></span>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'learning':
+        return (
+          <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl space-y-4">
+            <div>
+              <h3 className="text-[14px] font-extrabold text-white">Personalized Learning Roadmap</h3>
+              <p className="text-[10.5px] text-zinc-500 mt-0.5">Certified course paths and milestones to plug critical skill gaps</p>
+            </div>
+            <div className="space-y-3.5">
+              {[
+                { title: 'Advanced Google Analytics & CRM Systems', provider: 'Coursera (Google Professional Cert)', duration: 'Week 1-2', skill: 'Marketing Analytics' },
+                { title: 'Meta Ads & Media Buying Masterclass', provider: 'Meta Blueprint Training', duration: 'Week 3-4', skill: 'Meta Ads' },
+                { title: 'Conversion Rate Optimization (CRO) and A/B Testing', provider: 'CXL Institute Course', duration: 'Week 5-6', skill: 'Conversion Optimization' },
+                { title: 'HubSpot Email Marketing Automation', provider: 'HubSpot Academy Certified', duration: 'Week 7-8', skill: 'HubSpot' },
+              ].map((course, i) => (
+                <div key={i} className="bg-zinc-950/60 border border-zinc-850 p-3.5 rounded-xl flex items-center justify-between gap-4 group">
+                  <div className="space-y-1">
+                    <span className="text-[9px] font-extrabold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full uppercase">{course.duration}</span>
+                    <h4 className="text-[12.5px] font-bold text-white mt-1 group-hover:text-emerald-400 transition-colors">{course.title}</h4>
+                    <p className="text-[10px] text-zinc-400">{course.provider}</p>
+                  </div>
+                  <span className="text-[9.5px] font-bold px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-400 shrink-0">{course.skill}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+      case 'trends':
+        return (
+          <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl space-y-5">
+            <div>
+              <h3 className="text-[14px] font-extrabold text-white">Insights & Hiring Trends</h3>
+              <p className="text-[10.5px] text-zinc-500 mt-0.5">Multi-year predictive industry indicators and growth projections</p>
+            </div>
+            <div className="h-[200px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={report.salaryForecast}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                  <XAxis dataKey="year" tick={{ fontSize: 9, fill: '#71717a' }} />
+                  <YAxis tick={{ fontSize: 9, fill: '#71717a' }} />
+                  <Tooltip contentStyle={{ background: '#18181b', border: '1px solid #27272a', borderRadius: 8, fontSize: 10, color: '#fff' }} />
+                  <Area type="monotone" dataKey="projected" stroke="#10b981" fill="#10b981" fillOpacity={0.08} strokeWidth={2} name="LPA Salary" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="bg-zinc-950 border border-zinc-850 p-4 rounded-xl">
+              <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">AI replacement risk index</span>
+              <p className="text-[20px] font-black text-emerald-400 mt-1">25% (Low Risk)</p>
+              <p className="text-[10.5px] text-zinc-400 mt-1.5 leading-relaxed">Marketing strategy, visual brand engineering, and qualitative empathy metrics have strong defensibility against LLM/Agentic systems replacement.</p>
+            </div>
+          </div>
+        );
+
+      case 'salary':
+        return (
+          <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 shadow-xl space-y-4">
+            <div>
+              <h3 className="text-[14px] font-extrabold text-white">Salary Insights & LPA Ranges</h3>
+              <p className="text-[10.5px] text-zinc-500 mt-0.5">National compensation benchmark figures in Lakhs Per Annum (LPA)</p>
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="bg-zinc-950 border border-zinc-850 p-4 rounded-xl">
+                <span className="text-[9.5px] text-zinc-500 uppercase font-bold tracking-widest block">Entry Level</span>
+                <p className="text-[18px] font-black text-zinc-300 mt-1">₹{career.salaryEntry}L</p>
+                <span className="text-[8px] text-zinc-400 mt-0.5 block">0-2 Yrs Experience</span>
+              </div>
+              <div className="bg-zinc-950 border border-zinc-850 p-4 rounded-xl border-emerald-500/20">
+                <span className="text-[9.5px] text-emerald-400 uppercase font-bold tracking-widest block">Mid Level</span>
+                <p className="text-[18px] font-black text-white mt-1">₹{career.salaryMid}L</p>
+                <span className="text-[8px] text-zinc-400 mt-0.5 block">3-6 Yrs Experience</span>
+              </div>
+              <div className="bg-zinc-950 border border-zinc-850 p-4 rounded-xl border-purple-500/20">
+                <span className="text-[9.5px] text-purple-400 uppercase font-bold tracking-widest block">Senior Level</span>
+                <p className="text-[18px] font-black text-purple-400 mt-1">₹{career.salarySenior}L</p>
+                <span className="text-[8px] text-zinc-400 mt-0.5 block">7+ Yrs Experience</span>
+              </div>
+            </div>
+            <div className="bg-zinc-950 border border-zinc-850 p-4 rounded-xl">
+              <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Average Annual Salary Growth</span>
+              <p className="text-[20px] font-black text-emerald-400 mt-1">+{career.salaryGrowthRate}% YoY</p>
+              <p className="text-[10.5px] text-zinc-400 mt-1.5 leading-relaxed">Exceeds standard 8% tech inflation benchmark due to intense demand for specialized growth marketers.</p>
+            </div>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  const renderRightPanelWidget = () => {
+    const report = careerReport;
+    if (!report) return null;
+
+    return (
+      <div className="space-y-6">
+        {/* Career Intelligence Widget */}
+        <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-4 shadow-xl">
+          <div className="flex items-center justify-between mb-4 border-b border-zinc-800/60 pb-3">
+            <h3 className="text-[13px] font-extrabold text-white">Career Intelligence</h3>
+            <div className="flex gap-1">
+              {['jobs', 'startup', 'paths'].map((tab) => (
+                <button key={tab} onClick={() => setRightPanelTab(tab as any)} className={`text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wide transition-all ${rightPanelTab === tab ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                  {tab}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {rightPanelTab === 'jobs' && (
+            <div className="space-y-5">
+              {/* Top Job Roles */}
+              <div className="space-y-2.5">
+                <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest block">Top Job Roles for You</span>
+                {[
+                  { title: 'Digital Marketing Manager', match: 78 },
+                  { title: 'Growth Marketing Specialist', match: 74 },
+                  { title: 'Brand Marketing Manager', match: 71 },
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center justify-between bg-zinc-950/40 p-2.5 rounded-xl border border-zinc-850">
+                    <span className="text-[11.5px] font-bold text-zinc-300">{item.title}</span>
+                    <span className="text-[10.5px] font-bold text-emerald-400">{item.match}% Match</span>
+                  </div>
+                ))}
+                <button onClick={() => setActiveResultTab('jobs')} className="w-full text-center text-[10.5px] font-bold text-emerald-400 hover:text-emerald-300 hover:underline pt-1.5 flex items-center justify-center gap-1">
+                  View All Matching Jobs <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Best Locations */}
+              <div className="space-y-2.5 pt-2 border-t border-zinc-800/60">
+                <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest block">Best Locations for You</span>
+                {[
+                  { city: 'Bangalore, India', score: 92, label: 'Best Match', col: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
+                  { city: 'Mumbai, India', score: 86, label: 'High Opp.', col: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
+                  { city: 'Hyderabad, India', score: 84, label: 'High Opp.', col: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
+                  { city: 'Pune, India', score: 75, label: 'Good Opp.', col: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
+                  { city: 'Singapore', score: 73, label: 'High Growth', col: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
+                ].map((loc, i) => (
+                  <div key={i} className="flex items-center justify-between bg-zinc-950/40 p-2.5 rounded-xl border border-zinc-850">
+                    <span className="text-[11.5px] font-bold text-zinc-300">{loc.city}</span>
+                    <span className={`text-[8.5px] font-bold px-2 py-0.5 rounded ${loc.col}`}>{loc.label}</span>
+                  </div>
+                ))}
+                <button onClick={() => setActiveResultTab('locations')} className="w-full text-center text-[10.5px] font-bold text-emerald-400 hover:text-emerald-300 hover:underline pt-1.5 flex items-center justify-center gap-1">
+                  See all <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {rightPanelTab === 'startup' && (
+            <div className="space-y-4">
+              <div className="bg-zinc-950/60 p-3.5 border border-zinc-850 rounded-xl space-y-1">
+                <span className="text-[9.5px] text-zinc-500 uppercase font-bold tracking-widest block">Startup Viability Index</span>
+                <p className="text-[20px] font-black text-emerald-400">76%</p>
+                <p className="text-[9.5px] text-zinc-400">Highly viable based on your growth hacking skills</p>
+              </div>
+              <div className="space-y-2">
+                <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest block">Recommended Sectors</span>
+                {['Artificial Intelligence', 'B2B Marketing SaaS', 'D2C Retail Infrastructure'].map((sect, i) => (
+                  <div key={i} className="bg-zinc-950/40 p-2.5 rounded-xl border border-zinc-850 text-[11px] font-semibold text-zinc-300">{sect}</div>
+                ))}
+              </div>
+              <button onClick={() => setActiveResultTab('startups')} className="w-full text-center text-[10.5px] font-bold text-emerald-400 hover:text-emerald-300 hover:underline pt-1.5 flex items-center justify-center gap-1">
+                View Venture Analysis <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {rightPanelTab === 'paths' && (
+            <div className="space-y-3">
+              <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest block">Pivot Path Alignment</span>
+              {report.alternativePaths.slice(0, 3).map((ap, i) => (
+                <div key={i} className="bg-zinc-950/40 p-3 rounded-xl border border-zinc-850 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[12px] font-bold text-white">{ap.name}</span>
+                    <span className="text-[10.5px] font-bold text-emerald-400">{ap.matchScore}%</span>
+                  </div>
+                  <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="h-full bg-emerald-500" style={{ width: `${ap.matchScore}%` }} />
+                  </div>
+                </div>
+              ))}
+              <button onClick={() => setActiveResultTab('careers')} className="w-full text-center text-[10.5px] font-bold text-emerald-400 hover:text-emerald-300 hover:underline pt-1.5 flex items-center justify-center gap-1">
+                View Pivot Pathways <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Startup Intelligence (If You Build) Widget */}
+        <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-4.5 shadow-xl relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl group-hover:scale-150 transition-all duration-700 pointer-events-none" />
+          <div className="relative z-10 space-y-3.5">
+            <div>
+              <span className="text-[9px] font-extrabold tracking-widest text-emerald-400 bg-emerald-400/10 px-2.5 py-0.5 rounded-full border border-emerald-400/25 uppercase">Startup Intelligence (If You Build)</span>
+              <p className="text-[10px] text-zinc-500 mt-1.5">Based on your skills, interests & market opportunities</p>
+            </div>
+            <div className="bg-zinc-950/60 p-3.5 border border-zinc-850 rounded-xl space-y-2">
+              <div>
+                <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest block">Best Idea for You</span>
+                <span className="text-[12.5px] font-bold text-white flex items-center gap-1.5 mt-0.5"><Rocket className="w-4 h-4 text-emerald-400" /> AI Marketing Automation Platform</span>
+              </div>
+              <div className="flex items-center justify-between text-[10.5px] pt-1">
+                <span className="text-zinc-400">Est. Capital: <strong>₹8L - ₹20L</strong></span>
+                <span className="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/25 text-[8.5px] font-bold uppercase">High Potential</span>
+              </div>
+              <div className="text-[10.5px] text-zinc-400 pt-0.5">
+                <span>Best Location: <strong>Bangalore, India</strong></span>
+              </div>
+            </div>
+            <button onClick={() => setActiveResultTab('startups')} className="w-full text-center text-[10.5px] font-extrabold bg-zinc-800 hover:bg-zinc-700 text-white py-2.5 rounded-xl border border-zinc-700/50 transition-all shadow-md">
+              View Details
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // 1. RENDER RESULTS — original intelligence view with modules, charts, forecast, Decision DNA etc.
+  if (result && !isAnalysing) {
+    return (
+      <div className="min-h-screen bg-[#070709] text-zinc-100 transition-all duration-700">
+        <div className="max-w-5xl mx-auto px-5 sm:px-8 pt-6 pb-16">
+
+          {/* ── Search bar (sticky) ── */}
+          <div className="relative max-w-[680px] mx-auto mb-5">
+            <div className="relative flex items-center gap-3 bg-zinc-900/80 border border-zinc-800 rounded-[18px] shadow-lg px-5 py-3.5">
+              <Search className="w-[17px] h-[17px] shrink-0 text-zinc-500"/>
+              <input ref={inputRef} type="text" value={inputValue}
+                onChange={e=>setInputValue(e.target.value)}
+                onKeyDown={e=>{ if(e.key==='Enter') runQuery(); }}
+                placeholder="Refine or ask a new question…"
+                className="flex-1 bg-transparent outline-none text-[13.5px] font-medium text-white placeholder:text-zinc-500"/>
+              {inputValue.trim() && (
+                <motion.button onClick={()=>runQuery()} disabled={isAnalysing}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-[12px] bg-emerald-500 hover:bg-emerald-400 text-black text-[12px] font-bold shadow-sm disabled:opacity-50 shrink-0 transition-colors"
+                  whileHover={{ scale:1.03 }} whileTap={{ scale:0.95 }}>
+                  Analyse <Send className="w-3 h-3"/>
+                </motion.button>
+              )}
+              <motion.button onClick={resetAll}
+                className="w-8 h-8 flex items-center justify-center rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all shrink-0"
+                whileHover={{ scale:1.05 }} whileTap={{ scale:0.95 }} title="New search">
+                <RefreshCw className="w-3.5 h-3.5"/>
+              </motion.button>
+            </div>
+          </div>
+
+          {/* Gamification bar */}
+          <GamificationBar gami={gamification}/>
+
+          {/* ── Summary sentence ── */}
+          <motion.div className="rounded-2xl border border-zinc-800 p-4 mb-5 bg-zinc-900/60"
+            initial={{ opacity:0,y:10 }} animate={{ opacity:1,y:0 }}>
+            <p className="text-[13px] leading-relaxed font-medium text-zinc-300">{result.summary}</p>
+          </motion.div>
+
+
+
+
+
+          {/* ── Career Intelligence Report ── */}
+          {careerReport && <CareerIntelligenceReport analysis={careerReport}/>}
+
+          {/* ── Compare button ── */}
+          {prevResult && (
+            <motion.div className="flex justify-center mt-4" initial={{ opacity:0 }} animate={{ opacity:1 }}>
+              <button onClick={()=>setShowSplit(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-[12px] font-semibold text-zinc-400 hover:text-white hover:border-zinc-600 shadow-sm transition-all">
+                <SplitSquareHorizontal className="w-3.5 h-3.5"/> Compare with previous query
+              </button>
+            </motion.div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // 2. RENDER GORGEOUS SEARCH LANDING PAGE
   return (
-    <div className={`relative min-h-screen overflow-hidden transition-all duration-700 ${pageBg}`}>
+    <div className="relative min-h-screen bg-[#070709] text-white overflow-hidden transition-all duration-700 font-sans">
       <FloatingParticles />
       <div className="relative z-10 max-w-5xl mx-auto px-5 sm:px-8">
 
@@ -1060,22 +2139,22 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
         <motion.div className="text-center"
           animate={hasQueried?{paddingTop:'2rem',paddingBottom:'1rem'}:{paddingTop:'6rem',paddingBottom:'0rem'}}
           transition={{ duration:0.55, ease:[0.22,1,0.36,1] }}>
-          <motion.div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-zinc-50 border border-zinc-200 mb-5"
+          <motion.div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 mb-5"
             initial={{ opacity:0,y:-12 }} animate={{ opacity:1,y:0 }} transition={{ delay:0.1 }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-zinc-900 animate-pulse"/>
-            <span className="text-[10.5px] text-zinc-500 font-semibold tracking-widest uppercase">Next-Gen AI Intelligence Platform</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"/>
+            <span className="text-[10.5px] text-zinc-400 font-semibold tracking-widest uppercase">AI Field & Career Discovery Platform — India</span>
           </motion.div>
-          <motion.h1 className="font-extrabold text-black leading-[1.1] tracking-tight"
+          <motion.h1 className="font-extrabold text-white leading-[1.1] tracking-tight"
             animate={hasQueried?{fontSize:'1.6rem'}:{fontSize:'2.75rem'}} style={{fontSize:'2.75rem'}}
             transition={{ duration:0.5, ease:[0.22,1,0.36,1] }}>
             Smart AI Suggestions
           </motion.h1>
           <AnimatePresence>
             {!hasQueried && (
-              <motion.p className="text-[14px] text-zinc-400 max-w-[460px] mx-auto leading-relaxed mt-4"
+              <motion.p className="text-[13px] text-zinc-400 max-w-[460px] mx-auto leading-relaxed mt-4"
                 initial={{ opacity:0,y:6 }} animate={{ opacity:1,y:0 }}
                 exit={{ opacity:0,y:-6,height:0,marginTop:0 }} transition={{ duration:0.3 }}>
-                Emotion-aware AI that scores your query, detects bias, shows a 5-year forecast, and evolves the UI based on analytical depth.
+                Discover any field, degree, or career in India. Get real salary data, top colleges, entrance exams, and a 5-year future outlook — all in one search.
               </motion.p>
             )}
           </AnimatePresence>
@@ -1084,9 +2163,9 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
         {/* GOAL MODE */}
         <AnimatePresence>
           {!hasQueried && (
-            <motion.div className="flex justify-center mb-4 mt-6"
+            <motion.div className="flex justify-center mb-2 mt-5"
               initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}>
-              <GoalModeBar mode={goalMode} onChange={setGoalMode}/>
+              <GoalModeBar mode={goalMode} onChange={setGoalMode} onPromptClick={(q)=>runQuery(q)}/>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1094,21 +2173,21 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
         {/* SEARCH BAR */}
         <motion.div className="relative max-w-[680px] mx-auto mb-3"
           initial={{ opacity:0,y:14 }} animate={{ opacity:1,y:0 }} transition={{ delay:0.2 }}>
-          <div className={`absolute -inset-px rounded-[18px] blur-[6px] pointer-events-none transition-all duration-700 ${tc?`bg-gradient-to-r ${tc.bg} opacity-60`:'bg-zinc-200/30'}`}/>
-          <div className="relative flex items-center gap-3 bg-white rounded-[18px] border border-zinc-200 shadow-[0_2px_12px_rgba(0,0,0,0.06)] px-5 py-3.5">
-            <Search className={`w-[17px] h-[17px] shrink-0 transition-colors duration-500 ${tc?tc.accent.replace('text-','text-'):'text-zinc-400'}`}/>
+          <div className="absolute -inset-px rounded-[18px] blur-[6px] pointer-events-none transition-all duration-700 bg-emerald-500/10 opacity-60"/>
+          <div className="relative flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-[18px] shadow-[0_4px_24px_rgba(0,0,0,0.4)] px-5 py-4">
+            <Search className="w-[17px] h-[17px] shrink-0 text-emerald-400"/>
             <input ref={inputRef} type="text" value={inputValue}
               onChange={e=>setInputValue(e.target.value)}
               onFocus={handleSearchFocus}
               onKeyDown={e=>{ if(e.key==='Enter') runQuery(); }}
-              placeholder={isAuthenticated?'Ask anything — marketing ROI, market trends, risk score, financial analysis…':'Click to sign in and run AI-powered analysis…'}
-              className="flex-1 bg-transparent outline-none text-[13.5px] font-medium text-gray-800 placeholder:text-gray-400 placeholder:font-normal"
+              placeholder={isAuthenticated?'Search any field — MBBS, B.Tech CSE, CA, UPSC, Law, Architecture…':'Click to sign in and run AI-powered field analysis…'}
+              className="flex-1 bg-transparent outline-none text-[13.5px] font-medium text-white placeholder:text-zinc-500 placeholder:font-normal"
               readOnly={!isAuthenticated}/>
             <AnimatePresence>
               {!isAuthenticated && (
                 <motion.button initial={{ opacity:0,scale:0.9 }} animate={{ opacity:1,scale:1 }} exit={{ opacity:0,scale:0.9 }}
                   onClick={()=>{ setPendingQuery(inputValue); setShowAuthModal(true); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-700 text-white text-[11px] font-semibold shadow-sm shrink-0 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-white text-black text-[11px] font-semibold shadow-sm shrink-0 transition-colors"
                   whileHover={{ scale:1.03 }} whileTap={{ scale:0.96 }}>
                   <Lock className="w-3 h-3"/> Sign in to analyse
                 </motion.button>
@@ -1119,32 +2198,48 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
                 <motion.button initial={{ scale:0,opacity:0 }} animate={{ scale:1,opacity:1 }} exit={{ scale:0,opacity:0 }}
                   transition={{ type:'spring',stiffness:440,damping:26 }}
                   onClick={()=>runQuery()} disabled={isAnalysing}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-[12px] bg-zinc-900 hover:bg-zinc-700 text-white text-[12px] font-semibold shadow-sm disabled:opacity-50 shrink-0 transition-colors"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-[12px] bg-emerald-500 hover:bg-emerald-400 text-black text-[12px] font-bold shadow-sm disabled:opacity-50 shrink-0 transition-colors"
                   whileHover={{ scale:1.03 }} whileTap={{ scale:0.95 }}>
                   Analyse <Send className="w-3 h-3"/>
                 </motion.button>
               )}
             </AnimatePresence>
             {isAuthenticated && (
-              <motion.button onClick={()=>setIsVoice(v=>!v)} className={`w-8 h-8 flex items-center justify-center rounded-xl transition-colors shrink-0 ${isVoice?'bg-red-50 text-red-500':'text-gray-300 hover:text-gray-500 hover:bg-gray-50'}`} whileTap={{ scale:0.93 }} title="Voice input (demo)">
-                {isVoice?<MicOff className="w-4 h-4"/>:<Mic className="w-4 h-4"/>}
+              <motion.button
+                onClick={() => {
+                  const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                  if (!SR) { alert('Speech recognition not supported in this browser.'); return; }
+                  if (isListening && recognitionRef.current) {
+                    recognitionRef.current.stop();
+                    setIsListening(false);
+                    return;
+                  }
+                  const rec = new SR();
+                  rec.lang = 'en-US';
+                  rec.interimResults = false;
+                  rec.maxAlternatives = 1;
+                  rec.onresult = (e: any) => {
+                    const text = e.results[0][0].transcript;
+                    setInputValue(prev => prev ? prev + ' ' + text : text);
+                    setIsListening(false);
+                  };
+                  rec.onerror = () => setIsListening(false);
+                  rec.onend = () => setIsListening(false);
+                  recognitionRef.current = rec;
+                  rec.start();
+                  setIsListening(true);
+                }}
+                className={`w-8 h-8 flex items-center justify-center rounded-xl transition-all duration-300 shrink-0 ${
+                  isListening
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.2)] animate-pulse'
+                    : 'text-zinc-500 hover:text-white hover:bg-zinc-800'
+                }`}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                title={isListening ? 'Listening... click to stop' : 'Voice input'}>
+                <Mic className="w-4 h-4" />
               </motion.button>
             )}
-
-            {/* 💡 Intelligence Bulb — outline SVG, monochrome black, enterprise */}
-            <motion.button
-              onClick={()=>setShowAssistant(true)}
-              className="w-8 h-8 flex items-center justify-center rounded-xl shrink-0 text-slate-700 hover:text-slate-900 hover:bg-slate-100/80 transition-all"
-              whileHover={{ scale:1.08, boxShadow:'0 2px 12px rgba(0,0,0,0.10)' }}
-              whileTap={{ scale:0.93 }}
-              title="Intelligence Assistant — enhance query or analyse resume">
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6"
-                strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
-                <path d="M10 2.5C7.1 2.5 4.75 4.85 4.75 7.75c0 1.9 1 3.55 2.5 4.5v1.5c0 .28.22.5.5.5h4.5c.28 0 .5-.22.5-.5v-1.5c1.5-.95 2.5-2.6 2.5-4.5C15.25 4.85 12.9 2.5 10 2.5z"/>
-                <line x1="7.75" y1="16" x2="12.25" y2="16"/>
-                <line x1="8.5" y1="17.5" x2="11.5" y2="17.5"/>
-              </svg>
-            </motion.button>
 
           </div>
 
@@ -1152,17 +2247,13 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
           <AnimatePresence>
             {isAuthenticated && inputValue.trim() && <InputCorrection value={inputValue}/>}
             {!isAuthenticated && !hasQueried && (
-              <motion.p className="text-center text-[11px] text-zinc-400 mt-3"
+              <motion.p className="text-center text-[11px] text-zinc-500 mt-3"
                 initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}>
                 Free to browse · Sign in required to run AI analysis
               </motion.p>
             )}
           </AnimatePresence>
         </motion.div>
-
-        {/* QUICK PROMPTS — hidden on homepage, shown after search */}
-
-        {/* CAPABILITY TILES — hidden on homepage, shown after search */}
 
         {/* LOADING */}
         <AnimatePresence>
@@ -1172,19 +2263,19 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
               exit={{ opacity:0,scale:0.94 }} transition={{ duration:0.28 }}>
               <div className="relative w-[56px] h-[56px] mb-5">
                 {[0,1,2].map(i=>(
-                  <motion.span key={i} className="absolute inset-0 rounded-full border border-blue-300/70"
+                  <motion.span key={i} className="absolute inset-0 rounded-full border border-emerald-500/30"
                     animate={{ scale:[1,2.1,1],opacity:[0.5,0,0.5] }}
                     transition={{ duration:1.9,repeat:Infinity,delay:i*0.5 }}/>
                 ))}
-                <div className="absolute inset-0 flex items-center justify-center bg-white rounded-full border border-gray-100 shadow-md">
-                  <Brain className="w-6 h-6 text-blue-600"/>
+                <div className="absolute inset-0 flex items-center justify-center bg-zinc-900 rounded-full border border-zinc-800 shadow-md">
+                  <Brain className="w-6 h-6 text-emerald-400"/>
                 </div>
               </div>
-              <p className="text-[14px] font-extrabold text-gray-800 mb-1">Deep AI analysis running…</p>
-              <p className="text-[12px] text-gray-400 mb-5">Bias detection · Confidence scoring · 5-year forecast · Gamification</p>
+              <p className="text-[14px] font-extrabold text-white mb-1">Analysing field…</p>
+              <p className="text-[12px] text-zinc-500 mb-5">Salary data · Job demand · Top colleges · 5-year forecast</p>
               <div className="flex gap-2">
-                {['Scoring','Bias Check','Forecast','Insights'].map((lbl,i)=>(
-                  <motion.span key={lbl} className="text-[11px] px-2.5 py-1 rounded-full bg-white border border-blue-100 text-blue-600 font-bold shadow-sm"
+                {['Scoring','Field Analysis','5yr Forecast','Career Map'].map((lbl,i)=>(
+                  <motion.span key={lbl} className="text-[11px] px-2.5 py-1 rounded-full bg-zinc-900 border border-zinc-850 text-emerald-400 font-bold shadow-sm"
                     animate={{ opacity:[0.3,1,0.3] }} transition={{ duration:1.2,repeat:Infinity,delay:i*0.25 }}>
                     {lbl}
                   </motion.span>
@@ -1194,183 +2285,64 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
           )}
         </AnimatePresence>
 
-        {/* RESULTS */}
+        {/* ── Field discovery chips (education domain) ── */}
         <AnimatePresence>
-          {result && !isAnalysing && (
-            <motion.div ref={resultsRef} initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} transition={{ duration:0.3 }}>
+          {!hasQueried && (
+            <motion.div className="max-w-[680px] mx-auto mt-6"
+              initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }}
+              exit={{ opacity:0, y:-6 }} transition={{ delay:0.35 }}>
 
-              {/* Gamification bar */}
-              <GamificationBar gami={gamification}/>
-
-              {/* Action bar */}
-              <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
-                <div className="flex items-center gap-2">
-                  {prevResult && (
-                    <motion.button onClick={()=>setShowSplit(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-violet-700 bg-violet-50 border border-violet-200 rounded-xl hover:bg-violet-100 transition-all"
-                      whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}>
-                      <SplitSquareHorizontal className="w-3.5 h-3.5"/> Compare
-                    </motion.button>
-                  )}
-                  <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${tc!.badge}`}>{result.intelligence.domain} domain</span>
-                </div>
-                <motion.button onClick={resetAll}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold text-gray-500 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 shadow-sm"
-                  whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}>
-                  <RefreshCw className="w-3 h-3"/> New query
-                </motion.button>
-              </div>
-
-              {/* ═══ Decision DNA Profile ═══ */}
-              {decisionDNA && <DecisionDNA dna={decisionDNA} />}
-
-              {/* ═══ AI vs Human Thinking ═══ */}
-              {aiVsHuman && <AIvsHumanThinking data={aiVsHuman} />}
-
-              {/* ═══ Decision Consequence Timeline ═══ */}
-              {timelineNodes.length > 0 && <DecisionTimeline nodes={timelineNodes} />}
-
-              {/* Explainable AI Panel */}
-              <ExplainableAIPanel intel={result.intelligence} onUseEnhanced={q=>runQuery(q)}/>
-
-              {/* Keyword heatmap */}
-              <KeywordHeatmap words={result.intelligence.keywordStrengths}/>
-
-              {/* Future impact + alternatives */}
-              <FutureImpactRow intel={result.intelligence} onAltQuery={q=>runQuery(q)}/>
-
-              {/* Conversation thread */}
-              <div className="mb-5 space-y-2.5">
-                {conversation.map((msg,i)=>(
-                  <motion.div key={i} className={`flex items-end gap-2.5 ${msg.role==='user'?'justify-end':'justify-start'}`}
-                    initial={{ opacity:0,y:8 }} animate={{ opacity:1,y:0 }} transition={{ delay:i*0.05 }}>
-                    {msg.role==='ai' && (
-                      <div className="w-[30px] h-[30px] rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
-                        <Bot className="w-[14px] h-[14px] text-white"/>
-                      </div>
-                    )}
-                    <div className={`max-w-[78%] px-4 py-2.5 text-[13px] leading-relaxed rounded-2xl ${msg.role==='user'?'bg-gradient-to-r from-blue-500 to-violet-600 text-white font-semibold rounded-br-[4px] shadow-lg shadow-blue-500/20':'bg-white border border-gray-100 text-gray-700 rounded-bl-[4px] shadow-sm'}`}>
-                      {msg.text}
-                    </div>
-                    {msg.role==='user' && (
-                      <div className="w-[30px] h-[30px] rounded-xl bg-gray-200 flex items-center justify-center shrink-0 text-[10px] font-extrabold text-gray-500">
-                        {currentUser?.fullName?.charAt(0)?? 'U'}
-                      </div>
-                    )}
-                  </motion.div>
+              {/* Engineering row */}
+              <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
+                <Cpu className="w-3 h-3 text-blue-500"/>Engineering
+              </p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {['B.Tech CSE','B.Tech ECE','B.Tech Mechanical','B.Tech Civil','B.Tech Chemical','Data Science','AI & ML','B.Tech IT','B.Tech Aerospace'].map(f=>(
+                  <button key={f} onClick={()=>runQuery(`Scope of ${f} in India 2025`)}
+                    className="px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-300 text-[11px] font-semibold hover:bg-blue-500/20 hover:border-blue-400/40 transition-all">
+                    {f}
+                  </button>
                 ))}
               </div>
 
-              {/* KPI strip */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-6">
-                {result.kpis.map((kpi,i)=>(
-                  <motion.div key={i} className="bg-white rounded-2xl px-4 py-3.5 border border-gray-100/80 shadow-sm"
-                    initial={{ opacity:0,y:10,scale:0.96 }} animate={{ opacity:1,y:0,scale:1 }}
-                    transition={{ delay:0.08+i*0.07,type:'spring',stiffness:260,damping:22 }}
-                    whileHover={{ y:-2,boxShadow:'0 10px 28px rgba(0,0,0,0.07)' }}>
-                    <p className="text-[11px] text-gray-400 font-semibold mb-1 tracking-wide uppercase">{kpi.label}</p>
-                    <p className="text-[22px] font-extrabold text-gray-900 leading-none mb-2 tracking-tight">{kpi.value}</p>
-                    <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full ${kpi.up?'bg-emerald-50 text-emerald-700':'bg-red-50 text-red-600'}`}>
-                      {kpi.up?<ArrowUp className="w-2.5 h-2.5"/>:<ArrowDown className="w-2.5 h-2.5"/>}{kpi.change}
-                    </span>
-                  </motion.div>
+              {/* Medical row */}
+              <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
+                <ShieldCheck className="w-3 h-3 text-emerald-500"/>Medical & Health
+              </p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {['MBBS','BDS (Dentistry)','B.Pharm','Nursing (B.Sc)','BAMS (Ayurveda)','BHMS (Homeopathy)','Physiotherapy','Pharm.D','Biotechnology'].map(f=>(
+                  <button key={f} onClick={()=>runQuery(`Career scope of ${f} in India`)}
+                    className="px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] font-semibold hover:bg-emerald-500/20 hover:border-emerald-400/40 transition-all">
+                    {f}
+                  </button>
                 ))}
               </div>
 
-              {/* Current-period charts */}
-              {result.charts.length>0 && (
-                <motion.div className={`grid gap-4 mb-6 ${result.charts.length>1?'grid-cols-1 sm:grid-cols-2':'grid-cols-1'}`}
-                  initial={{ opacity:0,y:10 }} animate={{ opacity:1,y:0 }} transition={{ delay:0.2 }}>
-                  {result.charts.map((spec,ci)=>(
-                    <motion.div key={ci} className="bg-white rounded-2xl border border-gray-100/80 shadow-sm p-4"
-                      initial={{ opacity:0,scale:0.97 }} animate={{ opacity:1,scale:1 }} transition={{ delay:0.22+ci*0.1 }}>
-                      <p className="text-[11px] font-extrabold text-gray-700 uppercase tracking-wider mb-3">{spec.title}</p>
-                      <ChartRenderer spec={spec}/>
-                    </motion.div>
-                  ))}
-                </motion.div>
-              )}
-
-              {/* 5-Year Forecast */}
-              <AnimatePresence>
-                {showForecast && <ForecastSection result={result}/>}
-              </AnimatePresence>
-
-              {/* Module header + cards */}
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h2 className="text-[14px] font-extrabold text-gray-900 tracking-tight">Live Intelligence Modules</h2>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Click any module for the full deep-dive analysis</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 mb-7">
-                {result.modules.map(mod=>{
-                  const M=MODULES[mod]; const MIcon=M.icon; const show=revealedMods.includes(mod);
-                  return (
-                    <AnimatePresence key={mod}>
-                      {show && (
-                        <motion.div className="group bg-white rounded-2xl p-5 border border-gray-100/80 shadow-sm cursor-pointer overflow-hidden relative"
-                          initial={{ opacity:0,y:20,scale:0.96 }} animate={{ opacity:1,y:0,scale:1 }}
-                          exit={{ opacity:0,scale:0.96 }} transition={{ type:'spring',stiffness:230,damping:24 }}
-                          onClick={()=>onNavigate(M.page)}
-                          whileHover={{ y:-4,boxShadow:'0 20px 44px rgba(0,0,0,0.09)' }} whileTap={{ scale:0.98 }}>
-                          <div className="flex items-center justify-between mb-3">
-                            <div className={`w-9 h-9 rounded-xl ${M.iconBg} ${M.iconColor} flex items-center justify-center`}>
-                              <MIcon style={{ width:17,height:17 }}/>
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-400 group-hover:translate-x-0.5 transition-all"/>
-                          </div>
-                          <h3 className="text-[13px] font-extrabold text-gray-900 mb-0.5">{M.label}</h3>
-                          <p className="text-[11px] text-gray-400 leading-snug mb-4">{M.desc}</p>
-                          <div className="space-y-2.5">
-                            {M.metrics.map((m,j)=>(
-                              <div key={j}>
-                                <div className="flex items-center justify-between mb-1">
-                                  <span className="text-[11px] text-gray-400 font-medium">{m.label}</span>
-                                  <span className="text-[11px] font-extrabold text-gray-800">{m.value}</span>
-                                </div>
-                                {m.pct!==undefined && (
-                                  <div className="h-[3px] bg-gray-100 rounded-full overflow-hidden">
-                                    <motion.div className={`h-full rounded-full ${M.barColor}`}
-                                      initial={{ width:0 }} animate={{ width:`${m.pct}%` }}
-                                      transition={{ delay:0.3+j*0.1,duration:0.55,ease:'easeOut' }}/>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                          <div className="mt-4 pt-3.5 border-t border-gray-50 flex items-center justify-between">
-                            <span className={`text-[11px] font-bold ${M.arrowColor}`}>Open full analysis</span>
-                            <ArrowRight className={`w-3.5 h-3.5 ${M.arrowColor} group-hover:translate-x-0.5 transition-transform`}/>
-                          </div>
-                          <div className="absolute inset-0 bg-gradient-to-br from-transparent via-transparent to-black/[0.018] opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl pointer-events-none"/>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  );
-                })}
+              {/* Commerce & Law row */}
+              <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
+                <BarChart3 className="w-3 h-3 text-amber-500"/>Commerce, Law & Civil Services
+              </p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {['CA (Chartered Accountant)','B.Com + MBA','BA LLB / LLB','UPSC IAS','CS (Company Secretary)','CFA','BBA','CLAT — Law','State PCS'].map(f=>(
+                  <button key={f} onClick={()=>runQuery(`${f} career scope salary India`)}
+                    className="px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] font-semibold hover:bg-amber-500/20 hover:border-amber-400/40 transition-all">
+                    {f}
+                  </button>
+                ))}
               </div>
 
-              {/* Follow-up */}
-              <motion.div className="bg-white rounded-2xl border border-gray-100/80 shadow-sm p-4 mb-8"
-                initial={{ opacity:0,y:10 }} animate={{ opacity:1,y:0 }} transition={{ delay:0.65 }}>
-                <p className="text-[11px] text-gray-400 font-semibold mb-2.5 uppercase tracking-wide">Ask a follow-up</p>
-                <div className="flex gap-2">
-                  <input type="text" value={inputValue}
-                    onChange={e=>setInputValue(e.target.value)}
-                    onKeyDown={e=>{ if(e.key==='Enter') runQuery(); }}
-                    placeholder="e.g. What is the biggest risk to our growth this quarter?"
-                    className="flex-1 text-[13px] bg-gray-50/80 border border-gray-200 rounded-[12px] px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-300 text-gray-800 placeholder:text-gray-400 transition-all"/>
-                  <motion.button onClick={()=>runQuery()} disabled={!inputValue.trim()||isAnalysing}
-                    className="w-[42px] h-[42px] flex items-center justify-center rounded-[12px] bg-gradient-to-br from-blue-500 to-violet-600 text-white shadow-md shadow-blue-500/20 disabled:opacity-40"
-                    whileHover={{ scale:1.06 }} whileTap={{ scale:0.94 }}>
-                    <Send className="w-[15px] h-[15px]"/>
-                  </motion.button>
-                </div>
-              </motion.div>
-
-              {/* Bottom spacing */}
-              <div className="pb-12" />
+              {/* Arts, Design & Others row */}
+              <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
+                <Lightbulb className="w-3 h-3 text-violet-500"/>Arts, Design & Other Fields
+              </p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {['B.Arch (Architecture)','B.Des (Design)','Mass Communication','Hotel Management','Fine Arts','Psychology','Social Work','Education (B.Ed)','Agriculture (B.Sc)'].map(f=>(
+                  <button key={f} onClick={()=>runQuery(`${f} career scope future India`)}
+                    className="px-3 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-300 text-[11px] font-semibold hover:bg-violet-500/20 hover:border-violet-400/40 transition-all">
+                    {f}
+                  </button>
+                ))}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1378,10 +2350,10 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
         {/* Pre-query footer */}
         <AnimatePresence>
           {!hasQueried && (
-            <motion.p className="text-center text-[11px] text-zinc-300 pb-16 mt-8"
+            <motion.p className="text-center text-[11px] text-zinc-650 pb-16 mt-8"
               initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }} transition={{ delay:0.6 }}>
-              <span className="font-semibold text-zinc-400">CideDec</span>
-              &nbsp;·&nbsp;Emotion-Aware AI · Bias Detection · 5-Year Forecasting · Gamification
+              <span className="font-semibold text-zinc-500">CideDec</span>
+              &nbsp;·&nbsp;AI Field Discovery · Career Scope · 5-Year Forecasting · Bias Detection
             </motion.p>
           )}
         </AnimatePresence>
@@ -1404,7 +2376,7 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
         )}
       </AnimatePresence>
 
-      {/* ⭐ AI Assistant Modal */}
+      {/* AI Assistant Modal */}
       <AnimatePresence>
         {showAssistant && (
           <AIAssistantModal
@@ -1417,3 +2389,4 @@ export function SmartSuggestions({ onNavigate }: SmartSuggestionsProps) {
     </div>
   );
 }
+

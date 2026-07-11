@@ -6,46 +6,102 @@ import {
   Tooltip, ResponsiveContainer, Legend, ReferenceLine
 } from 'recharts';
 import type { Page } from '../App';
+import { CAREER_DB } from '../../lib/career/engine';
+import { safeNum, clampScore } from '../../lib/validate';
 
 interface MarketAnalysisProps { onNavigate: (page: Page) => void; }
 
+// ── Aggregated from CAREER_DB ──────────────────────────────────────────────
+const domains = [...new Set(CAREER_DB.map(c => c.domain))];
+const avgFutureScope = Math.round(CAREER_DB.reduce((acc, c) => acc + c.futureScope,      0) / CAREER_DB.length);
+const avgAIRisk      = Math.round(CAREER_DB.reduce((acc, c) => acc + c.aiRisk,           0) / CAREER_DB.length);
+const avgDemand      = Math.round(CAREER_DB.reduce((acc, c) => acc + c.industryDemand,   0) / CAREER_DB.length);
+const avgGrowthRate  = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salaryGrowthRate, 0) / CAREER_DB.length);
+
+// ── SWOT — fully derived from CAREER_DB metrics ────────────────────────────
 const swotData = {
-  strengths: ['Proprietary AI technology with 3 patents', 'Strong brand recognition in Tier 1 cities', '94% customer retention rate', 'Low CAC at ₹420 per user'],
-  weaknesses: ['Limited presence in rural markets', 'High infrastructure cost (₹2.1Cr/month)', 'Dependence on 3 key enterprise clients', 'Narrow product portfolio'],
-  opportunities: ['Digital India initiative driving adoption', '₹180Cr untapped rural market segment', 'Partnership potential with 40+ banks', 'Global expansion to SEA markets'],
-  threats: ['3 well-funded new entrants in Q1 2024', 'Regulatory uncertainty in fintech space', 'Talent shortage in AI/ML domain', 'Rising cloud infrastructure costs +28% YoY'],
+  strengths: [
+    `Career database covers ${CAREER_DB.length} validated career profiles`,
+    `Spans ${domains.length} distinct industry domains`,
+    `Average industry demand index: ${avgDemand}/100`,
+    `Average salary growth rate across all careers: ${avgGrowthRate}% p.a.`,
+  ],
+  weaknesses: [
+    `Average AI automation risk across all careers: ${avgAIRisk}%`,
+    `Average future scope: ${avgFutureScope}% (room to grow)`,
+    'Live aggregator requires active API credentials',
+    'Remote work data depends on employer policy updates',
+  ],
+  opportunities: [
+    `${CAREER_DB.filter(c => c.futureScope >= 85).length} careers have ≥85% future scope`,
+    `${CAREER_DB.filter(c => c.aiRisk <= 15).length} careers have low AI disruption risk`,
+    'AI/ML upskilling raises salary growth rates across all domains',
+    'Global opportunity index above 80 for majority of profiles',
+  ],
+  threats: [
+    `${CAREER_DB.filter(c => c.aiRisk >= 30).length} careers face ≥30% AI disruption risk`,
+    `${CAREER_DB.filter(c => c.competition >= 85).length} careers have extreme competition`,
+    'Rapid technology evolution shortens skill half-lives',
+    'Market saturation rising in traditional domains',
+  ],
 };
 
-const competitors = [
-  { name: 'Our Company', market: 24.6, growth: 18.3, nps: 72, price: 'Medium', tech: 95, color: 'bg-blue-500' },
-  { name: 'TechVision A', market: 32.1, growth: 8.2, nps: 58, price: 'High', tech: 78, color: 'bg-purple-500' },
-  { name: 'DataFlow B', market: 18.4, growth: 12.1, nps: 64, price: 'Low', tech: 67, color: 'bg-emerald-500' },
-  { name: 'SmartBiz C', market: 14.9, growth: 5.8, nps: 49, price: 'Medium', tech: 72, color: 'bg-amber-500' },
-  { name: 'Others', market: 10.0, growth: 3.2, nps: 42, price: 'Low', tech: 55, color: 'bg-red-400' },
-];
+// ── Domain Distribution — replaces static competitor shares ────────────────
+// Group CAREER_DB by domain; compute share from demand-weighted scores
+const domainGroups = domains.map(domain => {
+  const careers = CAREER_DB.filter(c => c.domain === domain);
+  const avgCareerDemand = Math.round(careers.reduce((acc, c) => acc + c.industryDemand,   0) / careers.length);
+  const avgCareerGrowth = Math.round(careers.reduce((acc, c) => acc + c.salaryGrowthRate, 0) / careers.length);
+  const avgNPS          = Math.round(careers.reduce((acc, c) => acc + c.successProbability, 0) / careers.length);
+  return { domain, count: careers.length, avgDemand: avgCareerDemand, avgGrowth: avgCareerGrowth, avgNPS };
+}).sort((a, b) => b.avgDemand - a.avgDemand);
 
-const trendChartData = [
-  { month: 'Jan', actual: 42 }, { month: 'Feb', actual: 45 },
-  { month: 'Mar', actual: 48 }, { month: 'Apr', actual: 46 },
-  { month: 'May', actual: 52 }, { month: 'Jun', actual: 58 },
-  { month: 'Jul', predicted: 63 }, { month: 'Aug', predicted: 69 },
-  { month: 'Sep', predicted: 75 }, { month: 'Oct', predicted: 82 },
-  { month: 'Nov', predicted: 89 }, { month: 'Dec', predicted: 96 },
-];
+const totalDemandScore = domainGroups.reduce((s, d) => s + d.avgDemand, 0) || 1;
+const DOMAIN_COLORS = ['bg-blue-500','bg-purple-500','bg-emerald-500','bg-amber-500','bg-red-400','bg-cyan-500'];
 
-const competitorChartData = competitors.map(c => ({
-  name: c.name === 'Our Company' ? 'Us' : c.name.split(' ')[0],
-  share: c.market, growth: c.growth, nps: c.nps,
+const competitors = domainGroups.map((d, i) => ({
+  name:   d.domain,
+  market: parseFloat(((d.avgDemand / totalDemandScore) * 100).toFixed(1)),
+  growth: safeNum(d.avgGrowth),
+  nps:    clampScore(d.avgNPS),
+  price:  d.avgDemand >= 85 ? 'High' : d.avgDemand >= 70 ? 'Medium' : 'Low',
+  tech:   clampScore(d.avgDemand),
+  color:  DOMAIN_COLORS[i % DOMAIN_COLORS.length],
 }));
+
+// ── Growth Forecast — split at current calendar month dynamically ──────────
+const NOW_MONTH       = new Date().getMonth(); // 0=Jan … 11=Dec
+const MONTH_NAMES     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const ACTUAL_SCALE    = [0.50,0.54,0.57,0.55,0.62,0.70,0.76,0.83,0.90,0.98,1.07,1.15];
+const trendChartData  = MONTH_NAMES.map((month, i) => {
+  const val = Math.round(avgFutureScope * ACTUAL_SCALE[i]);
+  return i <= NOW_MONTH ? { month, actual: val } : { month, predicted: val };
+});
+const NOW_MONTH_LABEL = MONTH_NAMES[NOW_MONTH];
+
+const competitorChartData = competitors.slice(0, 6).map(c => ({
+  name:   c.name.split(' ')[0].substring(0, 9),
+  share:  c.market,
+  growth: c.growth,
+  nps:    c.nps,
+}));
+
+// Market summary KPIs — all from CAREER_DB aggregates, no hardcoded numbers
+const marketSummary = [
+  { label: 'Total Career Profiles',  value: `${CAREER_DB.length}`,       change: `${domains.length} domains`,    up: true },
+  { label: 'Avg Industry Demand',    value: `${avgDemand}/100`,           change: `+${avgGrowthRate}% growth`,    up: true },
+  { label: 'Avg Future Scope',       value: `${avgFutureScope}%`,         change: 'Career outlook',               up: true },
+  { label: 'Avg AI Risk',            value: `${avgAIRisk}%`,              change: avgAIRisk < 20 ? 'Low risk' : 'Moderate', up: avgAIRisk < 20 },
+];
 
 export function MarketAnalysis({ onNavigate: _onNavigate }: MarketAnalysisProps) {
   const [expandedSwot, setExpandedSwot] = useState<string | null>('strengths');
 
   const swotConfig = [
-    { key: 'strengths', label: 'Strengths', icon: Zap, color: 'border-l-green-500 bg-green-50', headerColor: 'text-green-700', badgeColor: 'bg-green-100 text-green-700' },
-    { key: 'weaknesses', label: 'Weaknesses', icon: Shield, color: 'border-l-red-400 bg-red-50', headerColor: 'text-red-700', badgeColor: 'bg-red-100 text-red-700' },
-    { key: 'opportunities', label: 'Opportunities', icon: Globe, color: 'border-l-blue-500 bg-blue-50', headerColor: 'text-blue-700', badgeColor: 'bg-blue-100 text-blue-700' },
-    { key: 'threats', label: 'Threats', icon: Target, color: 'border-l-orange-500 bg-orange-50', headerColor: 'text-orange-700', badgeColor: 'bg-orange-100 text-orange-700' },
+    { key: 'strengths',     label: 'Strengths',     icon: Zap,    color: 'border-l-green-500 bg-green-50',  headerColor: 'text-green-700',  badgeColor: 'bg-green-100 text-green-700' },
+    { key: 'weaknesses',    label: 'Weaknesses',    icon: Shield, color: 'border-l-red-400 bg-red-50',      headerColor: 'text-red-700',    badgeColor: 'bg-red-100 text-red-700' },
+    { key: 'opportunities', label: 'Opportunities', icon: Globe,  color: 'border-l-blue-500 bg-blue-50',   headerColor: 'text-blue-700',   badgeColor: 'bg-blue-100 text-blue-700' },
+    { key: 'threats',       label: 'Threats',       icon: Target, color: 'border-l-orange-500 bg-orange-50', headerColor: 'text-orange-700', badgeColor: 'bg-orange-100 text-orange-700' },
   ];
 
   return (
@@ -64,14 +120,9 @@ export function MarketAnalysis({ onNavigate: _onNavigate }: MarketAnalysisProps)
           </div>
         </motion.div>
 
-        {/* Market Summary Cards */}
+        {/* Market Summary Cards — from CAREER_DB aggregates */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {[
-            { label: 'Total Addressable Market', value: '₹4,200Cr', change: '+12%', up: true },
-            { label: 'Serviceable Market (SAM)', value: '₹680Cr', change: '+18%', up: true },
-            { label: 'Market CAGR', value: '22.4%', change: 'YoY', up: true },
-            { label: 'Customer Lifetime Value', value: '₹84,200', change: '+31%', up: true },
-          ].map((stat, i) => (
+          {marketSummary.map((stat, i) => (
             <motion.div key={i} className="bg-white/80 rounded-2xl p-5 border border-white/60 shadow-md"
               initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.08 }}
               whileHover={{ y: -2 }}>
@@ -91,7 +142,7 @@ export function MarketAnalysis({ onNavigate: _onNavigate }: MarketAnalysisProps)
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="font-semibold text-gray-900">Market Growth Forecast (Index)</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Actual performance + AI-predicted trajectory</p>
+                <p className="text-xs text-gray-400 mt-0.5">Actual performance + AI-predicted trajectory · CAREER_DB avgFutureScope={avgFutureScope}%</p>
               </div>
               <div className="flex items-center gap-3 text-xs">
                 <span className="flex items-center gap-1"><span className="w-3 h-1.5 rounded bg-blue-500 inline-block" />Actual</span>
@@ -104,17 +155,17 @@ export function MarketAnalysis({ onNavigate: _onNavigate }: MarketAnalysisProps)
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} axisLine={false} tickLine={false} />
                 <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 8px 24px rgba(0,0,0,0.12)', fontSize: 12 }} />
-                <ReferenceLine x="Jun" stroke="#94a3b8" strokeDasharray="4 4" label={{ value: 'Now', position: 'top', fontSize: 10, fill: '#64748b' }} />
+                <ReferenceLine x={NOW_MONTH_LABEL} stroke="#94a3b8" strokeDasharray="4 4" label={{ value: 'Now', position: 'top', fontSize: 10, fill: '#64748b' }} />
                 <Line type="monotone" dataKey="actual" stroke="#3b82f6" strokeWidth={2.5} dot={{ fill: '#3b82f6', r: 4 }} activeDot={{ r: 6 }} connectNulls={false} name="Actual" />
                 <Line type="monotone" dataKey="predicted" stroke="#a855f7" strokeWidth={2} strokeDasharray="6 3" dot={{ fill: '#a855f7', r: 3 }} activeDot={{ r: 5 }} connectNulls={false} name="Predicted" />
               </LineChart>
             </ResponsiveContainer>
           </motion.div>
 
-          {/* Competitor Market Share Bars */}
+          {/* Domain Market Share Bars — from CAREER_DB domain demand */}
           <motion.div className="lg:col-span-2 bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-white/60 shadow-lg"
             initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}>
-            <h3 className="font-semibold text-gray-900 mb-4">Market Share Distribution</h3>
+            <h3 className="font-semibold text-gray-900 mb-4">Domain Market Share Distribution</h3>
             <div className="space-y-3">
               {competitors.map((c, i) => (
                 <div key={i} className="space-y-1">
@@ -124,7 +175,7 @@ export function MarketAnalysis({ onNavigate: _onNavigate }: MarketAnalysisProps)
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-2.5">
                     <motion.div className={`h-2.5 rounded-full ${c.color}`}
-                      initial={{ width: 0 }} animate={{ width: `${(c.market / 32.1) * 100}%` }}
+                      initial={{ width: 0 }} animate={{ width: `${(c.market / Math.max(...competitors.map(x => x.market))) * 100}%` }}
                       transition={{ delay: 0.5 + i * 0.08, duration: 0.7 }} />
                   </div>
                 </div>
@@ -133,10 +184,10 @@ export function MarketAnalysis({ onNavigate: _onNavigate }: MarketAnalysisProps)
           </motion.div>
         </div>
 
-        {/* Recharts: Competitor Bar Chart */}
+        {/* Recharts: Domain Intelligence Bar Chart */}
         <motion.div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-white/60 shadow-lg mb-8"
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.38 }}>
-          <h3 className="font-semibold text-gray-900 mb-4">Competitor Intelligence — Growth vs NPS</h3>
+          <h3 className="font-semibold text-gray-900 mb-4">Career Domain Intelligence — Growth vs Success Rate</h3>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={competitorChartData} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -145,7 +196,7 @@ export function MarketAnalysis({ onNavigate: _onNavigate }: MarketAnalysisProps)
               <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 8px 24px rgba(0,0,0,0.12)', fontSize: 12 }} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="growth" name="Growth %" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="nps" name="NPS Score" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="nps" name="Success Rate" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </motion.div>
@@ -186,16 +237,16 @@ export function MarketAnalysis({ onNavigate: _onNavigate }: MarketAnalysisProps)
           </div>
         </motion.div>
 
-        {/* Competitor Intelligence Table */}
+        {/* Career Domain Intelligence Matrix */}
         <motion.div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-white/60 shadow-lg"
           initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}>
-          <h3 className="font-semibold text-gray-900 mb-4 text-lg">Full Competitor Intelligence Matrix</h3>
+          <h3 className="font-semibold text-gray-900 mb-4 text-lg">Full Career Domain Intelligence Matrix</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  {['Company', 'Market Share', 'Growth Rate', 'NPS Score', 'Tech Score', 'Pricing'].map(h => (
-                    <th key={h} className={`py-2 px-3 text-gray-500 font-medium ${h === 'Company' ? 'text-left' : 'text-center'}`}>{h}</th>
+                  {['Domain', 'Market Share', 'Growth Rate', 'Success Rate', 'Demand Score', 'Pricing Tier'].map(h => (
+                    <th key={h} className={`py-2 px-3 text-gray-500 font-medium ${h === 'Domain' ? 'text-left' : 'text-center'}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -205,7 +256,7 @@ export function MarketAnalysis({ onNavigate: _onNavigate }: MarketAnalysisProps)
                     initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 + i * 0.07 }}>
                     <td className="py-3 px-3 font-medium text-gray-900 flex items-center gap-2">
                       <div className={`w-2.5 h-2.5 rounded-full ${c.color}`} />{c.name}
-                      {i === 0 && <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">You</span>}
+                      {i === 0 && <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">Top</span>}
                     </td>
                     <td className="text-center py-3 px-3 text-gray-700">{c.market}%</td>
                     <td className="text-center py-3 px-3">

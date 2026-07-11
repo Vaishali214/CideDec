@@ -11,28 +11,47 @@ import {
 } from 'recharts';
 import type { Page } from '../App';
 
-const forecastChartData = [
-  { month: 'Jan', revenue: 28 }, { month: 'Feb', revenue: 31 }, { month: 'Mar', revenue: 35 },
-  { month: 'Apr', revenue: 38 }, { month: 'May', revenue: 42 }, { month: 'Jun', revenue: 48 },
-  { month: 'Jul', predicted: 52 }, { month: 'Aug', predicted: 57 }, { month: 'Sep', predicted: 62 },
-  { month: 'Oct', predicted: 67 }, { month: 'Nov', predicted: 74 }, { month: 'Dec', predicted: 82 },
-];
+import { CAREER_DB } from '../../lib/career/engine';
+import { clampScore } from '../../lib/validate';
 
+// Calculate aggregated profiles dynamically from baseline
+const avgEntrySalary = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salaryEntry, 0) / CAREER_DB.length);
+const avgMidSalary = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salaryMid, 0) / CAREER_DB.length);
+const avgSeniorSalary = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salarySenior, 0) / CAREER_DB.length);
+const avgFutureScope = Math.round(CAREER_DB.reduce((acc, c) => acc + c.futureScope, 0) / CAREER_DB.length);
+const avgAIRisk = Math.round(CAREER_DB.reduce((acc, c) => acc + c.aiRisk, 0) / CAREER_DB.length);
+const avgDemand = Math.round(CAREER_DB.reduce((acc, c) => acc + c.industryDemand, 0) / CAREER_DB.length);
+
+// Dynamic month split — actual up to current month, predicted after
+const _NOW_MONTH = new Date().getMonth(); // 0=Jan … 11=Dec
+const _MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const _SALARY_SCALE = [0.9, 1.0, 1.1, 1.25, 1.4, 1.6, 1.75, 1.9, 2.0, 2.3, 2.6, 3.0];
+const _BASE = [avgEntrySalary, avgEntrySalary, avgEntrySalary, avgEntrySalary,
+               avgEntrySalary, avgEntrySalary, avgMidSalary, avgMidSalary,
+               avgMidSalary, avgMidSalary, avgMidSalary, avgSeniorSalary];
+const forecastChartData = _MONTH_NAMES.map((month, i) => {
+  const val = Math.round(_BASE[i] * _SALARY_SCALE[i]);
+  return i <= _NOW_MONTH ? { month, revenue: val } : { month, predicted: val };
+});
+
+const _avgGrowthRateAI = Math.round(CAREER_DB.reduce((acc, c) => acc + c.salaryGrowthRate,   0) / CAREER_DB.length);
+const _avgSuccessAI    = Math.round(CAREER_DB.reduce((acc, c) => acc + c.successProbability, 0) / CAREER_DB.length);
 const radarData = [
-  { metric: 'Revenue', score: 84 }, { metric: 'Growth', score: 91 },
-  { metric: 'Market Pos', score: 78 }, { metric: 'Innovation', score: 78 },
-  { metric: 'Risk Mgmt', score: 72 }, { metric: 'Operations', score: 82 },
+  { metric: 'Salary Entry',     score: clampScore(avgEntrySalary * 8) },
+  { metric: 'Salary Growth',    score: clampScore(_avgGrowthRateAI * 5) },
+  { metric: 'Future Outlook',   score: clampScore(avgFutureScope) },
+  { metric: 'Industry Capacity',score: clampScore(avgDemand) },
+  { metric: 'Safety Index',     score: clampScore(100 - avgAIRisk) },
+  { metric: 'Success Ratio',    score: clampScore(_avgSuccessAI) },
 ];
 
 interface AIInsightsProps { onNavigate: (page: Page) => void; }
 
 const riskFactors = [
-  { factor: 'Market Saturation Risk', score: 42, level: 'Moderate', color: 'text-amber-600', bg: 'bg-amber-50', bar: 'bg-amber-400', description: 'Competitive pressure increasing but differentiation holds' },
-  { factor: 'Financial Liquidity Risk', score: 18, level: 'Low', color: 'text-green-700', bg: 'bg-green-50', bar: 'bg-green-500', description: 'Strong cash reserves, current ratio 2.8x well above threshold' },
-  { factor: 'Regulatory Compliance Risk', score: 55, level: 'Moderate', color: 'text-amber-600', bg: 'bg-amber-50', bar: 'bg-amber-400', description: 'Fintech regulations evolving; legal team tracking changes' },
-  { factor: 'Technology Disruption Risk', score: 31, level: 'Low-Mod', color: 'text-blue-700', bg: 'bg-blue-50', bar: 'bg-blue-400', description: 'Active R&D investment mitigates obsolescence risk' },
-  { factor: 'Talent Retention Risk', score: 62, level: 'High', color: 'text-red-700', bg: 'bg-red-50', bar: 'bg-red-400', description: 'AI/ML talent market highly competitive; compensation review needed' },
-  { factor: 'Customer Concentration Risk', score: 47, level: 'Moderate', color: 'text-amber-600', bg: 'bg-amber-50', bar: 'bg-amber-500', description: 'Top 3 clients = 38% revenue; diversification in progress' },
+  { factor: 'AI/Automation Disruption', score: avgAIRisk, level: avgAIRisk > 60 ? 'High' : avgAIRisk > 40 ? 'Moderate' : 'Low', color: avgAIRisk > 60 ? 'text-red-700' : 'text-green-700', bg: 'bg-green-50', bar: 'bg-green-500', description: 'Matched career automation and AI risk quotient' },
+  { factor: 'Sectors & Competition Level', score: Math.round(CAREER_DB.reduce((acc, c) => acc + c.competition, 0) / CAREER_DB.length), level: 'Moderate', color: 'text-amber-600', bg: 'bg-amber-50', bar: 'bg-amber-400', description: 'Competitive pressure index within domains' },
+  { factor: 'Path Learning Difficulty', score: Math.round(CAREER_DB.reduce((acc, c) => acc + c.learningDifficulty, 0) / CAREER_DB.length), level: 'Moderate', color: 'text-amber-600', bg: 'bg-amber-50', bar: 'bg-amber-400', description: 'Learning curve and skill acquisition factor' },
+  { factor: 'Work-Life Quality Balance', score: 100 - Math.round(CAREER_DB.reduce((acc, c) => acc + c.workLifeBalance, 0) / CAREER_DB.length), level: 'Moderate', color: 'text-amber-600', bg: 'bg-amber-50', bar: 'bg-amber-400', description: 'Imbalance risk based on industry work-life indexes' },
 ];
 
 const aiRecommendations = [

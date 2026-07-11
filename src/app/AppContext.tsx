@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useNotifications } from '../hooks/useNotifications';
+import { syncPendingAccounts } from '../lib/syncService';
 
 /* ─── Types ─────────────────────────────────────────────── */
 export interface AppNotification {
@@ -48,6 +49,7 @@ interface AppContextValue {
   isSignedOut: boolean;
   signOut: () => void;
   cancelSignOut: () => void;
+  refreshProfile: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -56,7 +58,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const auth = useAuth();
 
-  // Map Supabase profile → AuthUser for backward compatibility
+  // Map profile → AuthUser shape consumed by the rest of the app
   const currentUser: AuthUser | null = auth.profile
     ? {
         id: auth.profile.id,
@@ -68,7 +70,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     : null;
 
-  // Notifications from Supabase
+  // Notifications from backend
   const notifHook = useNotifications(currentUser?.id);
 
   // Map DB notifications → AppNotification format for backward compatibility
@@ -85,13 +87,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [lastQuery, setLastQuery] = useState('');
   const [isSignedOut, setIsSignedOut] = useState(false);
 
-  // Login — calls Supabase Auth
+  // Sync pending accounts on boot
+  useEffect(() => {
+    syncPendingAccounts().catch(() => { /* sync failures are non-fatal */ });
+  }, []);
+
+  // Login
   const login = useCallback(async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
     const result = await auth.signIn(email, password);
     return result;
   }, [auth]);
 
-  // Register — calls Supabase Auth
+  // Register
   const register = useCallback(async (data: {
     username: string; email: string; fullName: string; password: string;
   }): Promise<{ ok: boolean; error?: string }> => {
@@ -99,7 +106,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return result;
   }, [auth]);
 
-  // Logout — calls Supabase Auth + resets local state
+  // Logout
   const logout = useCallback(async () => {
     await auth.signOut();
     setLastQuery('');
@@ -107,7 +114,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setIsSignedOut(false);
   }, [auth]);
 
-  // Add notification via Supabase
+  // Add notification
   const addNotification = useCallback((n: Omit<AppNotification, 'id' | 'read' | 'time'>) => {
     notifHook.addNotification({
       title: n.title,
@@ -132,8 +139,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       pendingQuery, setPendingQuery,
       notifications, addNotification, markAllRead,
       unreadCount: notifHook.unreadCount,
-      lastQuery, setLastQuery,
+      lastQuery: lastQuery,
+      setLastQuery,
       isSignedOut, signOut, cancelSignOut,
+      refreshProfile: auth.refreshProfile,
     }}>
       {children}
     </AppContext.Provider>
