@@ -1,23 +1,11 @@
-# Environment
-.env
-.env.local
-server/.env
-
-# Database
-database.sqlite
-server/database.sqlite
-
-# Logs
-logs/
-server/logs/
-*.log
-npm-debug.log*
-
-# Node Modules
+# Dependencies
 node_modules/
-server/node_modules/
 
-# Build
+# Environment variables (contains secrets)
+.env.local
+.env.*.local
+
+# Build output
 dist/
 
 # IDE
@@ -27,6 +15,10 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
 
 # Supabase local
 .supabase/
